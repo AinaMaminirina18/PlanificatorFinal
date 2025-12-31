@@ -11,6 +11,7 @@ class Client {
   final String nif;
   final String stat;
   final String axe;
+  final DateTime dateAjout;
   final int treatmentCount;
 
   Client({
@@ -24,6 +25,7 @@ class Client {
     required this.nif,
     required this.stat,
     required this.axe,
+    required this.dateAjout,
     this.treatmentCount = 0,
   });
 
@@ -43,6 +45,9 @@ class Client {
       nif: map['nif'] as String? ?? '',
       stat: map['stat'] as String? ?? '',
       axe: map['axe'] as String? ?? '',
+      dateAjout: map['date_ajout'] is String
+          ? DateTime.parse(map['date_ajout'] as String)
+          : DateTime.now(),
       treatmentCount: map['treatment_count'] as int? ?? 0,
     );
   }
@@ -60,6 +65,9 @@ class Client {
       nif: json['nif'] as String? ?? '',
       stat: json['stat'] as String? ?? '',
       axe: json['axe'] as String? ?? '',
+      dateAjout: json['date_ajout'] is String
+          ? DateTime.parse(json['date_ajout'] as String)
+          : DateTime.now(),
       treatmentCount: json['treatment_count'] as int? ?? 0,
     );
   }
@@ -76,6 +84,7 @@ class Client {
     'nif': nif,
     'stat': stat,
     'axe': axe,
+    'date_ajout': dateAjout.toIso8601String(),
     'treatment_count': treatmentCount,
   };
 
@@ -91,6 +100,7 @@ class Client {
     String? nif,
     String? stat,
     String? axe,
+    DateTime? dateAjout,
     int? treatmentCount,
   }) {
     return Client(
@@ -104,6 +114,7 @@ class Client {
       nif: nif ?? this.nif,
       stat: stat ?? this.stat,
       axe: axe ?? this.axe,
+      dateAjout: dateAjout ?? this.dateAjout,
       treatmentCount: treatmentCount ?? this.treatmentCount,
     );
   }
