@@ -1,16 +1,12 @@
 import 'package:logger/logger.dart';
 import 'package:flutter/material.dart';
-import 'package:crypto/crypto.dart';
-import 'dart:convert';
+import 'package:bcrypt/bcrypt.dart';
 import '../models/index.dart';
 import '../services/index.dart';
 
 class AuthRepository extends ChangeNotifier {
   final DatabaseService _db = DatabaseService();
   final logger = Logger();
-
-  // Clé secrète pour le salt (en production, utiliser une vraie clé d'environnement)
-  static const String _salt = 'planificator_secret_salt_key';
 
   User? _currentUser;
   bool _isLoading = false;
@@ -23,9 +19,19 @@ class AuthRepository extends ChangeNotifier {
   bool get isAuthenticated => _isAuthenticated;
   bool get isAdmin => _currentUser?.isAdmin ?? false;
 
-  /// Hache un mot de passe avec SHA-256
+  /// Hache un mot de passe avec bcrypt (sécurisé)
   String _hashPassword(String password) {
-    return sha256.convert(utf8.encode('$password$_salt')).toString();
+    return BCrypt.hashpw(password, BCrypt.gensalt());
+  }
+
+  /// Vérifie un mot de passe contre son hash bcrypt
+  bool _verifyPassword(String password, String hash) {
+    try {
+      return BCrypt.checkpw(password, hash);
+    } catch (e) {
+      logger.e('Erreur lors de la vérification du mot de passe: $e');
+      return false;
+    }
   }
 
   /// Connexion utilisateur
@@ -62,9 +68,9 @@ class AuthRepository extends ChangeNotifier {
         return false;
       }
 
-      // Vérifier le mot de passe avec hachage
-      final hashedPassword = _hashPassword(password);
-      if (row['password'] != hashedPassword) {
+      // Vérifier le mot de passe avec bcrypt
+      final storedHash = row['password'] as String;
+      if (!_verifyPassword(password, storedHash)) {
         _errorMessage = 'Nom d\'utilisateur ou mot de passe incorrect';
         logger.w('Tentative de connexion échouée pour: $username');
         return false;
