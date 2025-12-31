@@ -20,31 +20,31 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
   final List<Map<String, dynamic>> _sections = [
     {
-      'title': 'En attente',
-      'etat': 'en attente',
-      'icon': Icons.schedule,
+      'title': 'Anti termites (AT)',
+      'categorie': 'AT: Anti termites',
+      'icon': Icons.bug_report,
+      'color': Colors.purple,
+      'count': 0,
+    },
+    {
+      'title': 'Lutte antiparasitaire (PC)',
+      'categorie': 'PC',
+      'icon': Icons.pest_control,
       'color': Colors.orange,
       'count': 0,
     },
     {
-      'title': 'En cours',
-      'etat': 'en cours',
-      'icon': Icons.hourglass_top,
+      'title': 'Nettoyage Industriel (NI)',
+      'categorie': 'NI: Nettoyage Industriel',
+      'icon': Icons.cleaning_services,
       'color': Colors.blue,
       'count': 0,
     },
     {
-      'title': 'Terminé',
-      'etat': 'terminé',
-      'icon': Icons.check_circle,
-      'color': Colors.green,
-      'count': 0,
-    },
-    {
-      'title': 'Annulé',
-      'etat': 'annulé',
-      'icon': Icons.cancel,
-      'color': Colors.red,
+      'title': 'Ramassage Ordures (RO)',
+      'categorie': 'RO: Ramassage Ordures',
+      'icon': Icons.delete_sweep,
+      'color': Colors.brown,
       'count': 0,
     },
   ];
@@ -63,11 +63,10 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Historique'),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
-        ],
+      floatingActionButton: FloatingActionButton(
+        onPressed: _loadData,
+        tooltip: 'Actualiser',
+        child: const Icon(Icons.refresh),
       ),
       body: Consumer<PlanningDetailsRepository>(
         builder: (context, repository, _) {
@@ -86,19 +85,23 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
           final allTreatments = repository.upcomingTreatmentsComplete;
 
-          // Compter les traitements par état
-          final Map<String, List<Map<String, dynamic>>> treatmentsByState = {
-            'en attente': [],
-            'en cours': [],
-            'terminé': [],
-            'annulé': [],
-          };
+          // Compter les traitements par catégorie
+          final Map<String, List<Map<String, dynamic>>> treatmentsByCategorie =
+              {
+                'AT: Anti termites': [],
+                'PC': [],
+                'NI: Nettoyage Industriel': [],
+                'RO: Ramassage Ordures': [],
+              };
 
           for (final treatment in allTreatments) {
-            final etat = _convertToString(treatment['etat']).toLowerCase();
-            if (treatmentsByState.containsKey(etat)) {
-              treatmentsByState[etat]!.add(treatment);
+            var categorie = _convertToString(treatment['categorieTraitement']);
+            // Si catégorie est vide ou ne correspond à aucune clé, utiliser 'PC' par défaut
+            if (categorie.isEmpty ||
+                !treatmentsByCategorie.containsKey(categorie)) {
+              categorie = 'PC';
             }
+            treatmentsByCategorie[categorie]!.add(treatment);
           }
 
           if (allTreatments.isEmpty) {
@@ -109,34 +112,38 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: _sections.length,
-            itemBuilder: (context, index) {
-              final section = _sections[index];
-              final etat = section['etat'] as String;
-              final treatments = treatmentsByState[etat] ?? [];
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: GridView.count(
+                crossAxisCount: 2,
+                mainAxisSpacing: 24,
+                crossAxisSpacing: 24,
+                shrinkWrap: true,
+                children: _sections.map((section) {
+                  final categorie = section['categorie'] as String;
+                  final treatments = treatmentsByCategorie[categorie] ?? [];
+                  final shortName = _getShortCategoryName(categorie);
 
-              return _SectionCard(
-                title: section['title'] as String,
-                etat: etat,
-                icon: section['icon'] as IconData,
-                color: section['color'] as Color,
-                count: treatments.length,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => _TreatmentListScreen(
-                        title: section['title'] as String,
-                        etat: etat,
-                        treatments: treatments,
-                      ),
-                    ),
+                  return _CategoryButton(
+                    label: shortName,
+                    count: treatments.length,
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => _TreatmentListScreen(
+                            title: section['title'] as String,
+                            categorie: categorie,
+                            treatments: treatments,
+                          ),
+                        ),
+                      );
+                    },
                   );
-                },
-              );
-            },
+                }).toList(),
+              ),
+            ),
           );
         },
       ),
@@ -153,12 +160,20 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     }
     return value.toString();
   }
-}
 
-/// Card pour afficher une section d'état
+  /// Extraire le code court de la catégorie (AT, PC, NI, RO)
+  String _getShortCategoryName(String fullName) {
+    if (fullName.contains('AT')) return 'AT';
+    if (fullName.contains('PC')) return 'PC';
+    if (fullName.contains('NI')) return 'NI';
+    if (fullName.contains('RO')) return 'RO';
+    return 'PC'; // Par défaut
+  }
+}
+/// Card pour afficher une section de catégorie
 class _SectionCard extends StatelessWidget {
   final String title;
-  final String etat;
+  final String categorie;
   final IconData icon;
   final Color color;
   final int count;
@@ -166,7 +181,7 @@ class _SectionCard extends StatelessWidget {
 
   const _SectionCard({
     required this.title,
-    required this.etat,
+    required this.categorie,
     required this.icon,
     required this.color,
     required this.count,
@@ -224,16 +239,15 @@ class _SectionCard extends StatelessWidget {
     );
   }
 }
-
 /// Écran pour afficher la liste complète des traitements d'une section
 class _TreatmentListScreen extends StatelessWidget {
   final String title;
-  final String etat;
+  final String categorie;
   final List<Map<String, dynamic>> treatments;
 
   const _TreatmentListScreen({
     required this.title,
-    required this.etat,
+    required this.categorie,
     required this.treatments,
   });
 
@@ -269,7 +283,6 @@ class _TreatmentListScreen extends StatelessWidget {
     );
   }
 }
-
 /// Card pour afficher un traitement
 class _TreatmentCard extends StatelessWidget {
   final Map<String, dynamic> treatment;
@@ -494,7 +507,6 @@ class _TreatmentDetailScreen extends StatelessWidget {
     }
   }
 }
-
 /// Row pour afficher un détail clé-valeur
 class _DetailRow extends StatelessWidget {
   final String label;
@@ -524,6 +536,64 @@ class _DetailRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Widget pour afficher un bouton de catégorie
+class _CategoryButton extends StatelessWidget {
+  final String label;
+  final int count;
+  final VoidCallback onPressed;
+
+  const _CategoryButton({
+    required this.label,
+    required this.count,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.red[400],
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.red.withOpacity(0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$count traitement(s)',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
