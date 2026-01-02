@@ -15,12 +15,20 @@ class Signalement {
 
   // Serialization from JSON (MySQL result)
   factory Signalement.fromJson(Map<String, dynamic> json) {
+    // Helper pour convertir Blob en String si nécessaire
+    String _toStr(dynamic val, [String def = '']) {
+      if (val == null) return def;
+      if (val is String) return val;
+      if (val is List<int>) return String.fromCharCodes(val); // Blob conversion
+      return val.toString();
+    }
+
     return Signalement(
       id: json['id_signalement'] ?? json['signalement_id'],
       planningDetailId:
           json['planning_detail_id'] ?? json['id_planning_details'] ?? 0,
-      motif: json['motif'] ?? '',
-      type: json['type'] ?? 'décalage',
+      motif: _toStr(json['motif'], ''),
+      type: _toStr(json['type'], 'décalage'),
       dateSignalement: json['date_signalement'] != null
           ? DateTime.parse(json['date_signalement'].toString())
           : DateTime.now(),
