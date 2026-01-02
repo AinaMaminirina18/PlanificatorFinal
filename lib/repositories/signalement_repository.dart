@@ -27,9 +27,9 @@ class SignalementRepository extends ChangeNotifier {
     try {
       const sql = '''
         SELECT 
-          signalementId, planning_details_id, motif, type, date_signalement
+          signalement_id, planning_detail_id, motif, type
         FROM Signalement
-        ORDER BY date_signalement DESC
+        ORDER BY signalement_id DESC
       ''';
 
       final rows = await _db.query(sql);
