@@ -89,32 +89,57 @@ class _SignalementDialogState extends State<SignalementDialog> {
         return;
       }
 
-      // Créer le signalement
+      // ✅ ÉTAPE 1: Créer le signalement (enregistre le motif)
       await repo.createSignalement(
         planningDetailsId: widget.planningDetail.planningDetailId,
         motif: _motifCtrl.text,
         type: _type,
       );
+      logger.i('✅ Signalement créé');
 
-      // Modifier la date
-      await repo.modifierDatePlanning(
-        planningDetailsId: widget.planningDetail.planningDetailId,
-        newDate: newDate,
-      );
-
-      // Si "changer redondance": à implémenter après ajout de planningId au modèle
+      // ✅ ÉTAPE 2: Appliquer la logique CHANGER vs GARDER
       if (_changerRedondance && _nouvelleRedondance != null) {
-        // TODO: Implement redondance modification when planningId is available
+        // === MODE 1: CHANGER redondance (modifie TOUTES les dates futures) ===
+        logger.i(
+          '🔄 MODE CHANGER: modifier redondance pour TOUTES les dates futures',
+        );
+        logger.i(
+          '   planningId=${widget.planningDetail.planningId}, redondance=$_nouvelleRedondance',
+        );
+
+        await repo.modifierRedondance(
+          planningId: widget.planningDetail.planningId,
+          planningDetailsId: widget.planningDetail.planningDetailId,
+          newRedondance: _nouvelleRedondance!,
+        );
+      } else {
+        // === MODE 2: GARDER redondance (modifie JUSTE cette date) ===
+        logger.i('📌 MODE GARDER: modifier JUSTE cette date');
+        logger.i(
+          '   planningDetailId=${widget.planningDetail.planningDetailId}, newDate=$newDate',
+        );
+
+        await repo.modifierDatePlanning(
+          planningDetailsId: widget.planningDetail.planningDetailId,
+          newDate: newDate,
+        );
       }
 
       if (mounted) {
         widget.onSaved();
         Navigator.pop(context);
+
+        final modeTexte = _changerRedondance
+            ? 'redondance modifiée'
+            : 'date modifiée';
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Signalement de $_type enregistré')),
+          SnackBar(
+            content: Text('Signalement de $_type enregistré ($modeTexte)'),
+          ),
         );
       }
     } catch (e) {
+      logger.e('❌ Erreur signalement: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
