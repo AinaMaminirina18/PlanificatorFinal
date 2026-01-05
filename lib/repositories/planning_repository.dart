@@ -504,7 +504,8 @@ class PlanningRepository extends ChangeNotifier {
         return int.parse(parts[0]);
       }
     } catch (e) {
-      print('❌ Erreur parsing frequency: $e');
+      // Utiliser le logger global
+      Logger().e('❌ Erreur parsing frequency: $e');
     }
     return 1; // Défaut: 1 mois
   }

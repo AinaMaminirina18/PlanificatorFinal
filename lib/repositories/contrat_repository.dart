@@ -305,4 +305,99 @@ class ContratRepository extends ChangeNotifier {
       return -1;
     }
   }
+
+  /// Abroge/résilie un contrat et marque tous les plannings futurs comme 'Classé sans suite'
+  /// Retourne true si l'abrogation s'est bien passée
+  Future<bool> abrogateContract({
+    required int contratId,
+    required DateTime abrogationDate,
+    String? motif,
+  }) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      // 1. Mettre à jour le contrat avec la date d'abrogation
+      final updateContratSql = '''
+        UPDATE Contrat 
+        SET statut_contrat = 'Résilié', 
+            date_abrogation = ?, 
+            motif_abrogation = ?,
+            date_fin = ?
+        WHERE contrat_id = ?
+      ''';
+
+      await _db.execute(updateContratSql, [
+        abrogationDate.toString().split(' ')[0], // Format YYYY-MM-DD
+        motif,
+        abrogationDate.toString().split(' ')[0], // Mettre à jour date_fin
+        contratId,
+      ]);
+
+      logger.i('Contrat $contratId marqué comme Résilié à $abrogationDate');
+
+      // 2. Trouver tous les traitements du contrat
+      final treatementsSql = '''
+        SELECT traitement_id FROM Traitement WHERE contrat_id = ?
+      ''';
+      final treatments = await _db.query(treatementsSql, [contratId]);
+
+      // 3. Pour chaque traitement, marquer les plannings futurs comme 'Classé sans suite'
+      for (final treatment in treatments) {
+        final treatmentId = treatment['traitement_id'];
+
+        // Récupérer tous les plannings futurs pour ce traitement
+        final planningsSql = '''
+          SELECT planning_id FROM Planning WHERE traitement_id = ? AND date > ?
+        ''';
+        final plannings = await _db.query(planningsSql, [
+          treatmentId,
+          abrogationDate.toString().split(' ')[0],
+        ]);
+
+        // Marquer chaque planning et ses détails comme 'Classé sans suite'
+        for (final planning in plannings) {
+          final planningId = planning['planning_id'];
+
+          final updatePlanningDetailsSql = '''
+            UPDATE PlanningDetails 
+            SET statut = 'Classé sans suite'
+            WHERE planning_id = ?
+          ''';
+
+          await _db.execute(updatePlanningDetailsSql, [planningId]);
+
+          logger.i(
+            'Planning $planningId marqué comme Classé sans suite pour traitement $treatmentId',
+          );
+        }
+      }
+
+      // 4. Mettre à jour la liste locale et l'affichage
+      if (_currentContrat?.contratId == contratId) {
+        _currentContrat = _currentContrat?.copyWith(
+          statutContrat: 'Résilié',
+          dateFin: abrogationDate,
+        );
+      }
+
+      _contrats = _contrats.map((c) {
+        if (c.contratId == contratId) {
+          return c.copyWith(statutContrat: 'Résilié', dateFin: abrogationDate);
+        }
+        return c;
+      }).toList();
+
+      logger.i('Abrogation du contrat $contratId complétée avec succès');
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString();
+      logger.e('Erreur lors de l\'abrogation du contrat: $e');
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
 }

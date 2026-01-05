@@ -4,8 +4,6 @@ import '../models/index.dart';
 import '../services/index.dart';
 import '../utils/date_helper.dart';
 
-/// Repository pour la gestion des signalements (avancement/décalage)
-/// Conforme à la logique Kivy (main.py, signaler())
 class SignalementRepository extends ChangeNotifier {
   final DatabaseService _db = DatabaseService();
   final logger = Logger();
@@ -59,17 +57,11 @@ class SignalementRepository extends ChangeNotifier {
     try {
       const sql = '''
         INSERT INTO Signalement 
-        (planning_details_id, motif, type, date_signalement)
-        VALUES (?, ?, ?, ?)
+        (planning_detail_id, motif, type)
+        VALUES (?, ?, ?)
       ''';
 
-      final now = DateTime.now();
-      await _db.execute(sql, [
-        planningDetailsId,
-        motif,
-        type,
-        DateHelper.toDbFormat(now),
-      ]);
+      await _db.execute(sql, [planningDetailsId, motif, type]);
 
       logger.i('✅ Signalement créé: type=$type, motif=$motif');
 
@@ -259,7 +251,7 @@ class SignalementRepository extends ChangeNotifier {
     notifyListeners();
 
     try {
-      const sql = 'DELETE FROM Signalement WHERE signalementId = ?';
+      const sql = 'DELETE FROM Signalement WHERE signalement_id = ?';
       await _db.execute(sql, [signalementId]);
 
       logger.i('Signalement $signalementId supprimé');
@@ -280,10 +272,10 @@ class SignalementRepository extends ChangeNotifier {
     try {
       const sql = '''
         SELECT 
-          signalementId, planning_details_id, motif, type, date_signalement
+          signalement_id, planning_detail_id, motif, type
         FROM Signalement 
-        WHERE planning_details_id = ? 
-        ORDER BY date_signalement DESC
+        WHERE planning_detail_id = ? 
+        ORDER BY signalement_id DESC
       ''';
 
       final results = await _db.query(sql, [planningDetailId]);
