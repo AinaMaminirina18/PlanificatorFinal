@@ -53,11 +53,9 @@ class _PlanningScreenState extends State<PlanningScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Charger les traitements planifiés depuis la base de données
+    // Charger TOUS les traitements (passés, présents, futurs) pour le calendrier
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context
-          .read<PlanningDetailsRepository>()
-          .loadUpcomingTreatmentsComplete();
+      context.read<PlanningDetailsRepository>().loadAllTreatmentsComplete();
     });
   }
 
@@ -76,10 +74,14 @@ class _PlanningScreenState extends State<PlanningScreen> {
   ) {
     return treatments.where((treatment) {
       try {
+        // ✅ CORRECTION: Utiliser 'date' (la colonne formatée par SQL) pour le filtrage
         final dateValue = treatment['date'];
+        if (dateValue == null) return false;
+
         final dateStr = _convertToString(dateValue);
         if (dateStr.isEmpty) return false;
 
+        // dateStr est au format YYYY-MM-DD (DATE_FORMAT depuis SQL)
         final parts = dateStr.split('-');
         if (parts.length != 3) return false;
 
@@ -103,9 +105,7 @@ class _PlanningScreenState extends State<PlanningScreen> {
       floatingActionButton: FloatingActionButton(
         heroTag: 'planning_refresh',
         onPressed: () {
-          context
-              .read<PlanningDetailsRepository>()
-              .loadUpcomingTreatmentsComplete();
+          context.read<PlanningDetailsRepository>().loadAllTreatmentsComplete();
         },
         tooltip: 'Actualiser',
         child: const Icon(Icons.refresh),
@@ -114,7 +114,7 @@ class _PlanningScreenState extends State<PlanningScreen> {
         builder: (context, detailsRepository, _) {
           final treatmentsForSelected = _getTreatmentsForDay(
             _selectedDay,
-            detailsRepository.upcomingTreatmentsComplete,
+            detailsRepository.allTreatmentsComplete,
           );
 
           return SingleChildScrollView(
@@ -124,7 +124,7 @@ class _PlanningScreenState extends State<PlanningScreen> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   child: _buildCalendar(
-                    detailsRepository.upcomingTreatmentsComplete,
+                    detailsRepository.allTreatmentsComplete,
                   ),
                 ),
 
@@ -366,21 +366,12 @@ class _PlanningDetailScreen extends StatefulWidget {
 }
 
 class _PlanningDetailScreenState extends State<_PlanningDetailScreen> {
-  late RemarqueRepository _remarqueRepository;
   final TextEditingController _remarqueController = TextEditingController();
   final TextEditingController _problemeController = TextEditingController();
-
-  final List<String> _modePaiements = [
-    'Chèque',
-    'Espèce',
-    'Virement',
-    'Mobile Money',
-  ];
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _remarqueRepository = context.read<RemarqueRepository>();
   }
 
   String _convertToString(dynamic value) {
@@ -426,9 +417,9 @@ class _PlanningDetailScreenState extends State<_PlanningDetailScreen> {
           onSaved: () async {
             logger.i('✅ Remarque enregistrée');
 
-            // Recharger les données IMMÉDIATEMENT
+            // ✅ CORRECTION: Attendre vraiment que le chargement se termine
             if (mounted) {
-              context
+              await context
                   .read<PlanningDetailsRepository>()
                   .loadUpcomingTreatmentsComplete();
             }
@@ -445,8 +436,7 @@ class _PlanningDetailScreenState extends State<_PlanningDetailScreen> {
               );
             }
 
-            // Fermer l'écran de détail APRÈS le rechargement
-            await Future.delayed(const Duration(milliseconds: 1200));
+            // Fermer l'écran de détail APRÈS le rechargement confirmé
             if (mounted) {
               Navigator.of(context).pop();
             }
@@ -474,13 +464,13 @@ class _PlanningDetailScreenState extends State<_PlanningDetailScreen> {
       showDialog(
         context: context,
         builder: (ctx) => SignalementDialog(
-          planningDetail: planningDetail!,
+          planningDetail: planningDetail,
           onSaved: () async {
             logger.i('✅ Signalement enregistré');
 
-            // Recharger les données IMMÉDIATEMENT
+            // ✅ CORRECTION: Attendre vraiment que le chargement se termine
             if (mounted) {
-              context
+              await context
                   .read<PlanningDetailsRepository>()
                   .loadUpcomingTreatmentsComplete();
             }
@@ -497,8 +487,7 @@ class _PlanningDetailScreenState extends State<_PlanningDetailScreen> {
               );
             }
 
-            // Fermer l'écran de détail APRÈS le rechargement
-            await Future.delayed(const Duration(milliseconds: 1200));
+            // Fermer l'écran de détail APRÈS le rechargement confirmé
             if (mounted) {
               Navigator.of(context).pop();
             }
@@ -525,6 +514,7 @@ class _PlanningDetailScreenState extends State<_PlanningDetailScreen> {
     final traitement = _convertToString(widget.treatment['traitement']);
     final axe = _convertToString(widget.treatment['axe']);
     final etat = _convertToString(widget.treatment['etat']);
+    // ✅ CORRECTION: Utiliser 'date' (la colonne formatée par SQL en YYYY-MM-DD)
     final date = _convertToString(widget.treatment['date']);
 
     return Scaffold(
