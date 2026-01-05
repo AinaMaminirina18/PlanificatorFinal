@@ -1,8 +1,10 @@
 import 'package:logger/logger.dart';
 import 'package:flutter/material.dart';
 import '../models/index.dart';
+import '../services/index.dart';
 
 class TypeTraitementRepository extends ChangeNotifier {
+  final DatabaseService _db = DatabaseService();
   final logger = Logger();
 
   List<TypeTraitement> _traitements = [];
@@ -26,22 +28,36 @@ class TypeTraitementRepository extends ChangeNotifier {
     ];
   }
 
-  /// Charge les types de traitement prédéfinis
+  /// Charge les types de traitement depuis la base de données
   Future<void> loadAllTraitements() async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      // Initialiser la liste prédéfinie
-      _initializeTreatments();
+      // Charger depuis la BD
+      final query = 'SELECT * FROM TypeTraitement ORDER BY id_type_traitement';
+      final results = await _db.query(query);
 
-      logger.i(
-        '${_traitements.length} types de traitement chargés (prédéfinis)',
-      );
+      if (results.isEmpty) {
+        // Si aucun résultat, initialiser la liste prédéfinie (fallback)
+        logger.w(
+          'Aucun type de traitement en BD, utilisation de la liste prédéfinie',
+        );
+        _initializeTreatments();
+      } else {
+        _traitements = results
+            .map((row) => TypeTraitement.fromJson(row))
+            .toList();
+        logger.i(
+          '${_traitements.length} types de traitement chargés depuis la BD',
+        );
+      }
     } catch (e) {
       _errorMessage = e.toString();
       logger.e('Erreur lors du chargement des types de traitement: $e');
+      // Fallback: initialiser la liste prédéfinie en cas d'erreur
+      _initializeTreatments();
     } finally {
       _isLoading = false;
       notifyListeners();

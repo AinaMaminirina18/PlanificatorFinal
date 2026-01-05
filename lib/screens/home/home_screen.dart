@@ -330,7 +330,8 @@ class _DashboardTabState extends State<_DashboardTab> {
             cells: [
               DataCell(
                 Text(
-                  treatment['date'] ?? '',
+                  // ✅ CORRECTION: Utiliser 'date_planification' au lieu de 'date'
+                  treatment['date_planification'] ?? treatment['date'] ?? '',
                   style: TextStyle(
                     color: textColor,
                     fontWeight: FontWeight.w500,

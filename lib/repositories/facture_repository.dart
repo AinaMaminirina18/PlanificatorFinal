@@ -119,6 +119,69 @@ class FactureRepository extends ChangeNotifier {
     }
   }
 
+  /// Récupère les factures associées à un planning_detail_id
+  Future<List<Facture>> getFacturesByPlanningDetail(
+    int planningDetailId,
+  ) async {
+    try {
+      const sql = '''
+        SELECT 
+          f.facture_id,
+          f.planning_detail_id,
+          f.reference_facture,
+          f.montant,
+          f.mode,
+          f.etablissement_payeur,
+          f.date_cheque,
+          f.numero_cheque,
+          f.date_traitement,
+          f.etat,
+          f.axe
+        FROM Facture f
+        WHERE f.planning_detail_id = ?
+        ORDER BY f.date_traitement DESC
+      ''';
+
+      final rows = await _db.query(sql, [planningDetailId]);
+      final factures = rows.map((row) => Facture.fromMap(row)).toList();
+
+      logger.i(
+        '✅ ${factures.length} factures trouvées pour planning_detail_id $planningDetailId',
+      );
+      return factures;
+    } catch (e) {
+      logger.e('❌ Erreur lors du chargement des factures: $e');
+      return [];
+    }
+  }
+
+  /// Récupère l'historique des changements de prix d'une facture
+  Future<List<Map<String, dynamic>>> getPriceHistory(int factureId) async {
+    try {
+      const sql = '''
+        SELECT 
+          history_id,
+          facture_id,
+          old_amount,
+          new_amount,
+          change_date,
+          changed_by
+        FROM Historique_prix
+        WHERE facture_id = ?
+        ORDER BY change_date DESC
+      ''';
+
+      final rows = await _db.query(sql, [factureId]);
+      logger.i(
+        '✅ ${rows.length} changements de prix trouvés pour facture_id $factureId',
+      );
+      return rows;
+    } catch (e) {
+      logger.e('❌ Erreur lors du chargement de l\'historique des prix: $e');
+      return [];
+    }
+  }
+
   /// Met à jour le prix d'une facture et recharge les données
   /// (La somme totale se mettra à jour automatiquement grâce à notifyListeners())
   Future<bool> updateFacturePrice(int factureId, int newPrice) async {

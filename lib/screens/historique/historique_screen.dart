@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:logger/logger.dart';
+import '../../models/index.dart';
 import '../../repositories/index.dart';
 import '../../widgets/index.dart';
 
@@ -56,7 +58,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   }
 
   void _loadData() {
-    _planningDetailsRepo.loadUpcomingTreatmentsComplete();
+    // ✅ CORRECTION: Charger TOUS les traitements (passés + futurs) pas juste les à venir
+    _planningDetailsRepo.loadAllTreatmentsComplete();
   }
 
   @override
@@ -83,7 +86,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             );
           }
 
-          final allTreatments = repository.upcomingTreatmentsComplete;
+          // ✅ CORRECTION: Utiliser allTreatmentsComplete pour afficher TOUS les traitements
+          final allTreatments = repository.allTreatmentsComplete;
 
           // Compter les traitements par catégorie (utiliser les codes courts AT, PC, NI, RO)
           final Map<String, List<Map<String, dynamic>>> treatmentsByCode = {
@@ -482,10 +486,75 @@ class _PlanningCard extends StatelessWidget {
 }
 
 /// Card pour afficher un traitement en détail
-class _TreatmentDetailScreen extends StatelessWidget {
+class _TreatmentDetailScreen extends StatefulWidget {
   final Map<String, dynamic> treatment;
 
   const _TreatmentDetailScreen({required this.treatment});
+
+  @override
+  State<_TreatmentDetailScreen> createState() => _TreatmentDetailScreenState();
+}
+
+class _TreatmentDetailScreenState extends State<_TreatmentDetailScreen> {
+  late Future<Map<String, dynamic>> _detailsFuture;
+  final _logger = Logger();
+
+  @override
+  void initState() {
+    super.initState();
+    _detailsFuture = _loadDetails();
+  }
+
+  /// Charger les remarques, signalements, factures et historique des prix pour ce traitement
+  Future<Map<String, dynamic>> _loadDetails() async {
+    try {
+      final planningDetailId = widget.treatment['planning_detail_id'] as int?;
+      if (planningDetailId == null) {
+        return {
+          'remarques': [],
+          'signalements': [],
+          'factures': [],
+          'priceHistories': {},
+        };
+      }
+
+      final remarqueRepo = context.read<RemarqueRepository>();
+      final signalementRepo = context.read<SignalementRepository>();
+      final factureRepo = context.read<FactureRepository>();
+
+      final remarques = await remarqueRepo.getRemarques(planningDetailId);
+      final signalements = await signalementRepo.getSignalements(
+        planningDetailId,
+      );
+      final factures = await factureRepo.getFacturesByPlanningDetail(
+        planningDetailId,
+      );
+
+      // Charger l'historique des prix pour chaque facture
+      final Map<int, List<Map<String, dynamic>>> priceHistories = {};
+      for (final facture in factures) {
+        final history = await factureRepo.getPriceHistory(facture.factureId);
+        if (history.isNotEmpty) {
+          priceHistories[facture.factureId] = history;
+        }
+      }
+
+      return {
+        'remarques': remarques,
+        'signalements': signalements,
+        'factures': factures,
+        'priceHistories': priceHistories,
+      };
+    } catch (e) {
+      _logger.e('Erreur chargement détails: $e');
+      return {
+        'remarques': [],
+        'signalements': [],
+        'factures': [],
+        'priceHistories': {},
+      };
+    }
+  }
 
   String _convertToString(dynamic value) {
     if (value == null) return '';
@@ -506,108 +575,727 @@ class _TreatmentDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final traitement = _convertToString(treatment['traitement']);
-    final date = _convertToString(treatment['date']);
-    final etat = _convertToString(treatment['etat']);
-    final axe = _convertToString(treatment['axe']);
+    final traitement = _convertToString(widget.treatment['traitement']);
+    // ✅ CORRECTION: Utiliser 'date_planification' au lieu de 'date'
+    final date = _convertToString(
+      widget.treatment['date_planification'] ?? widget.treatment['date'],
+    );
+    final etat = _convertToString(widget.treatment['etat']);
+    final axe = _convertToString(widget.treatment['axe']);
 
     return Scaffold(
       appBar: AppBar(title: Text(traitement)),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Résumé principal
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Traitement',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.titleSmall?.copyWith(color: Colors.grey[600]),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      traitement,
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 16),
-                    _DetailRow('Date de planification', date),
-                    _DetailRow('État', etat),
-                    _DetailRow('Axe', axe),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
+      body: FutureBuilder<Map<String, dynamic>>(
+        future: _detailsFuture,
+        builder: (context, snapshot) {
+          List<Remarque> remarques = [];
+          List<Signalement> signalements = [];
+          List<Facture> factures = [];
+          Map<int, List<Map<String, dynamic>>> priceHistories = {};
 
-            // Section: Historique
-            Text(
-              'Historique',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              elevation: 1,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _DetailRow('Créé le', date),
-                    _DetailRow('Statut', etat),
-                    _DetailRow('Dernier statut', etat),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
+          if (snapshot.connectionState == ConnectionState.done &&
+              snapshot.hasData) {
+            remarques = (snapshot.data!['remarques'] ?? []) as List<Remarque>;
+            signalements =
+                (snapshot.data!['signalements'] ?? []) as List<Signalement>;
+            factures = (snapshot.data!['factures'] ?? []) as List<Facture>;
+            priceHistories =
+                (snapshot.data!['priceHistories'] ?? {})
+                    as Map<int, List<Map<String, dynamic>>>;
+          }
 
-            // Section: Facturation
-            Text(
-              'Facturation',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              elevation: 1,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Aucune facture actuellement'),
-                    const SizedBox(height: 12),
-                    ElevatedButton(
-                      onPressed: () {},
-                      child: const Text('Créer une facture'),
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Résumé principal
+                Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Traitement',
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(color: Colors.grey[600]),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          traitement,
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 16),
+                        _DetailRow('Date de planification', date),
+                        _DetailRow('État', etat),
+                        _DetailRow('Axe', axe),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+                const SizedBox(height: 24),
+
+                // ✅ NOUVEAU: Section Remarques
+                if (remarques.isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Remarques (${remarques.length})',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...remarques.map((remarque) {
+                        return Card(
+                          elevation: 1,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (remarque.contenu?.isNotEmpty ?? false) ...[
+                                  Text(
+                                    'Contenu',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Colors.grey[600],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    remarque.contenu ?? '',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                if (remarque.probleme?.isNotEmpty ?? false) ...[
+                                  Text(
+                                    'Problème identifié',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Colors.grey[600],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    remarque.probleme ?? '',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                if (remarque.action?.isNotEmpty ?? false) ...[
+                                  Text(
+                                    'Action à prendre',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Colors.grey[600],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    remarque.action ?? '',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                // ✅ NOUVEAU: Infos de paiement
+                                if (remarque.modePaiement?.isNotEmpty ??
+                                    false) ...[
+                                  Text(
+                                    'Mode de paiement',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Colors.grey[600],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    remarque.modePaiement ?? '',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                if (remarque.nomFacture?.isNotEmpty ??
+                                    false) ...[
+                                  Text(
+                                    'N° Facture',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Colors.grey[600],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    remarque.nomFacture ?? '',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                if (remarque.datePayement?.isNotEmpty ??
+                                    false) ...[
+                                  Text(
+                                    'Date de paiement',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Colors.grey[600],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    remarque.datePayement ?? '',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                if (remarque.etablissement?.isNotEmpty ??
+                                    false) ...[
+                                  Text(
+                                    'Établissement',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Colors.grey[600],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    remarque.etablissement ?? '',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                if (remarque.numeroCheque?.isNotEmpty ??
+                                    false) ...[
+                                  Text(
+                                    'N° Chèque',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Colors.grey[600],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    remarque.numeroCheque ?? '',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                // État du paiement
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: remarque.estPayee
+                                        ? Colors.green.shade100
+                                        : Colors.orange.shade100,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    remarque.estPayee ? 'PAYÉE' : 'NON PAYÉE',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: remarque.estPayee
+                                          ? Colors.green.shade800
+                                          : Colors.orange.shade800,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                      const SizedBox(height: 12),
+                    ],
+                  ),
+
+                // ✅ NOUVEAU: Section Signalements
+                if (signalements.isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Signalements (${signalements.length})',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...signalements.map((signalement) {
+                        return Card(
+                          elevation: 1,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: signalement.type == 'avancement'
+                                        ? Colors.green.shade100
+                                        : Colors.orange.shade100,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    signalement.type.toUpperCase(),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: signalement.type == 'avancement'
+                                          ? Colors.green.shade800
+                                          : Colors.orange.shade800,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Motif',
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: Colors.grey[600],
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  signalement.motif,
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                      const SizedBox(height: 12),
+                    ],
+                  ),
+
+                // ✅ NOUVEAU: Section Factures
+                if (factures.isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Factures (${factures.length})',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...factures.map((facture) {
+                        final montantStr = facture.montant.toString();
+                        final etatFacture = facture.etat;
+                        final bgColor =
+                            etatFacture.toLowerCase().contains('payée')
+                            ? Colors.green.shade50
+                            : Colors.orange.shade50;
+                        final badgeColor =
+                            etatFacture.toLowerCase().contains('payée')
+                            ? Colors.green
+                            : Colors.orange;
+
+                        return Card(
+                          elevation: 1,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          color: bgColor,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Référence facture
+                                if (facture.referenceFacture?.isNotEmpty ??
+                                    false) ...[
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Référence',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: Colors.grey[600],
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                      ),
+                                      Text(
+                                        facture.referenceFacture ?? '',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodyMedium,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+                                // Montant
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Montant',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: Colors.grey[600],
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                    Text(
+                                      '$montantStr Ar',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'État',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: Colors.grey[600],
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: badgeColor.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        etatFacture,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: badgeColor,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (facture.axe.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Axe',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: Colors.grey[600],
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                      ),
+                                      Text(
+                                        facture.axe,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodyMedium,
+                                      ),
+                                    ],
+                                  ),
+                                  // Mode de paiement
+                                  if (facture.mode?.isNotEmpty ?? false) ...[
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          'Mode de paiement',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: Colors.grey[600],
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                        ),
+                                        Text(
+                                          facture.mode ?? '',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodyMedium,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                  // Établissement payeur
+                                  if (facture.etablissementPayeur?.isNotEmpty ??
+                                      false) ...[
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          'Établissement',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: Colors.grey[600],
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                        ),
+                                        Text(
+                                          facture.etablissementPayeur ?? '',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodyMedium,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                  // Date chèque
+                                  if (facture.dateCheque != null) ...[
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          'Date du chèque',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: Colors.grey[600],
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                        ),
+                                        Text(
+                                          '${facture.dateCheque?.day}/${facture.dateCheque?.month}/${facture.dateCheque?.year}',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodyMedium,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                  // Numéro chèque
+                                  if (facture.numeroCheque?.isNotEmpty ??
+                                      false) ...[
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          'N° du chèque',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: Colors.grey[600],
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                        ),
+                                        Text(
+                                          facture.numeroCheque ?? '',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodyMedium,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                                // ✅ NOUVEAU: Historique des prix
+                                if (priceHistories.containsKey(
+                                      facture.factureId,
+                                    ) &&
+                                    priceHistories[facture.factureId]!
+                                        .isNotEmpty) ...[
+                                  const SizedBox(height: 12),
+                                  Divider(color: Colors.grey[300]),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Changements de montant',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Colors.grey[600],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ...priceHistories[facture.factureId]!.map((
+                                    change,
+                                  ) {
+                                    final oldAmount = change['old_amount'] ?? 0;
+                                    final newAmount = change['new_amount'] ?? 0;
+                                    final changeDate = change['change_date'];
+                                    final changedBy =
+                                        change['changed_by'] ?? 'System';
+                                    final dateParsed = changeDate is DateTime
+                                        ? changeDate
+                                        : DateTime.tryParse(
+                                            changeDate.toString(),
+                                          );
+
+                                    return Container(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey[50],
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(
+                                          color: Colors.grey[200]!,
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Text(
+                                                '$oldAmount Ar',
+                                                style: TextStyle(
+                                                  color: Colors.red[700],
+                                                  fontWeight: FontWeight.bold,
+                                                  decoration: TextDecoration
+                                                      .lineThrough,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Icon(
+                                                Icons.arrow_right,
+                                                size: 16,
+                                                color: Colors.grey[600],
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                '$newAmount Ar',
+                                                style: TextStyle(
+                                                  color: Colors.green[700],
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            dateParsed != null
+                                                ? 'le ${dateParsed.day}/${dateParsed.month}/${dateParsed.year} à ${dateParsed.hour}:${dateParsed.minute.toString().padLeft(2, '0')}'
+                                                : 'Date inconnue',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  color: Colors.grey[600],
+                                                ),
+                                          ),
+                                          if (changedBy != 'System')
+                                            Text(
+                                              'par $changedBy',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    color: Colors.grey[600],
+                                                    fontStyle: FontStyle.italic,
+                                                  ),
+                                            ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                ],
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                      const SizedBox(height: 12),
+                    ],
+                  ),
+
+                // Section: Message si rien
+                if (remarques.isEmpty &&
+                    signalements.isEmpty &&
+                    factures.isEmpty)
+                  Text(
+                    'Aucune remarque, signalement ou facture',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+                  ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

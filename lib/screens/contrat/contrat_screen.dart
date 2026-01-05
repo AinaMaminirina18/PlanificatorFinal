@@ -11,6 +11,7 @@ import '../../repositories/index.dart';
 import '../../widgets/index.dart';
 import '../../utils/date_utils.dart' as DateUtils;
 import '../../utils/date_helper.dart';
+import '../../utils/number_formatter.dart';
 import '../../services/database_service.dart';
 
 class ContratScreen extends StatefulWidget {
@@ -23,18 +24,21 @@ class ContratScreen extends StatefulWidget {
 
 class _ContratScreenState extends State<ContratScreen> {
   late Future<List<Map<String, dynamic>>> _contratsWithClientsAndTreatments;
-  bool _initialized = false;
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    // Initialiser les données une seule fois au démarrage
+    _contratsWithClientsAndTreatments = _fetchContratsWithDetails();
   }
 
-  void _initializeData() {
-    if (!_initialized) {
-      _initialized = true;
+  /// Recharger les données
+  void _reloadData() {
+    setState(() {
       _contratsWithClientsAndTreatments = _fetchContratsWithDetails();
-    }
+    });
   }
 
   /// Récupère les contrats avec les infos du client et nombre de traitements
@@ -134,66 +138,204 @@ class _ContratScreenState extends State<ContratScreen> {
     }
   }
 
+  /// Construit l'en-tête avec gradient et barre de recherche
+  Widget _buildHeader(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.blue[600]!, Colors.blue[400]!],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(16),
+          bottomRight: Radius.circular(16),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Barre de recherche avec bouton d'actualisation
+          Row(
+            children: [
+              // Barre de recherche
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Rechercher par client ou référence...',
+                    hintStyle: const TextStyle(color: Colors.white70),
+                    prefixIcon: const Icon(Icons.search, color: Colors.white70),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {
+                                _searchQuery = '';
+                              });
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.2),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                  ),
+                  style: const TextStyle(color: Colors.white),
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value.toLowerCase();
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Bouton d'actualisation
+              Tooltip(
+                message: 'Actualiser',
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.25),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.refresh, color: Colors.white),
+                    onPressed: () {
+                      _searchQuery = '';
+                      _searchController.clear();
+                      _reloadData();
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    _initializeData();
     return Scaffold(
-      body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _contratsWithClientsAndTreatments,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      body: Column(
+        children: [
+          // En-tête avec gradient bleu et barre de recherche
+          _buildHeader(context),
+          // Liste des contrats
+          Expanded(
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: _contratsWithClientsAndTreatments,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-          if (snapshot.hasError) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                  const SizedBox(height: 16),
-                  Text('Erreur: ${snapshot.error}'),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _contratsWithClientsAndTreatments =
-                            _fetchContratsWithDetails();
-                      });
-                    },
-                    child: const Text('Réessayer'),
-                  ),
-                ],
-              ),
-            );
-          }
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          size: 48,
+                          color: Colors.red,
+                        ),
+                        const SizedBox(height: 16),
+                        Text('Erreur: ${snapshot.error}'),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              _contratsWithClientsAndTreatments =
+                                  _fetchContratsWithDetails();
+                            });
+                          },
+                          child: const Text('Réessayer'),
+                        ),
+                      ],
+                    ),
+                  );
+                }
 
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const EmptyStateWidget(
-              title: 'Aucun contrat',
-              message: 'Aucun contrat trouvé. Créez-en un pour commencer.',
-              icon: Icons.description_outlined,
-            );
-          }
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const EmptyStateWidget(
+                    title: 'Aucun contrat',
+                    message:
+                        'Aucun contrat trouvé. Créez-en un pour commencer.',
+                    icon: Icons.description_outlined,
+                  );
+                }
 
-          final contratsWithDetails = snapshot.data!;
-          return ListView.builder(
-            padding: const EdgeInsets.all(8),
-            itemCount: contratsWithDetails.length,
-            itemBuilder: (context, index) {
-              final data = contratsWithDetails[index];
-              final contrat = data['contrat'] as Contrat;
-              final client = data['client'] as Client?;
-              final numTraitements = data['numTraitements'] as int;
+                var contratsWithDetails = snapshot.data!;
 
-              return _buildContratListItem(
-                contrat: contrat,
-                client: client,
-                numTraitements: numTraitements,
-              );
-            },
-          );
-        },
+                // Appliquer le filtre de recherche
+                if (_searchQuery.isNotEmpty) {
+                  contratsWithDetails = contratsWithDetails.where((data) {
+                    final client = data['client'] as Client?;
+                    final contrat = data['contrat'] as Contrat;
+                    final clientName =
+                        '${client?.nom ?? ""} ${client?.prenom ?? ""}'
+                            .toLowerCase();
+                    final contratRef = contrat.referenceContrat.toLowerCase();
+
+                    return clientName.contains(_searchQuery) ||
+                        contratRef.contains(_searchQuery);
+                  }).toList();
+                }
+
+                // Message si aucun résultat après recherche
+                if (contratsWithDetails.isEmpty && _searchQuery.isNotEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.search_off,
+                          size: 48,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Aucun contrat correspondant à "$_searchQuery"',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(8),
+                  itemCount: contratsWithDetails.length,
+                  itemBuilder: (context, index) {
+                    final data = contratsWithDetails[index];
+                    final contrat = data['contrat'] as Contrat;
+                    final client = data['client'] as Client?;
+                    final numTraitements = data['numTraitements'] as int;
+
+                    return _buildContratListItem(
+                      contrat: contrat,
+                      client: client,
+                      numTraitements: numTraitements,
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         heroTag: 'contrat_add',
@@ -461,6 +603,19 @@ class _ContratScreenState extends State<ContratScreen> {
               child: const Text('📅 Planning'),
             ),
 
+          // Bouton: Abroger/Résilier (si contrat actif)
+          if (contrat.statutContrat == 'Actif')
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _showAbrogationDialog(contrat);
+              },
+              child: const Text(
+                '⚠️ Abroger',
+                style: TextStyle(color: Colors.orange),
+              ),
+            ),
+
           // Bouton: Supprimer
           TextButton(
             onPressed: () {
@@ -551,24 +706,24 @@ class _ContratScreenState extends State<ContratScreen> {
           ),
           TextButton(
             onPressed: () async {
+              // Fermer d'abord le dialog avec le dialog context
               Navigator.of(ctx).pop();
               try {
                 await context.read<ContratRepository>().deleteContrat(
                   contrat.contratId,
                 );
                 if (!mounted) return;
-                Navigator.of(context).pop(); // Fermer le dialogue principal
+                // Recharger la liste sans essayer de pop
+                setState(() {
+                  _contratsWithClientsAndTreatments =
+                      _fetchContratsWithDetails();
+                });
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('✅ Contrat supprimé avec succès'),
                     backgroundColor: Colors.green,
                   ),
                 );
-                // Recharger la liste
-                setState(() {
-                  _contratsWithClientsAndTreatments =
-                      _fetchContratsWithDetails();
-                });
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
@@ -581,6 +736,162 @@ class _ContratScreenState extends State<ContratScreen> {
             child: const Text('Supprimer', style: TextStyle(color: Colors.red)),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Afficher le dialogue d'abrogation/résiliation de contrat
+  void _showAbrogationDialog(Contrat contrat) {
+    DateTime? selectedDate = DateTime.now();
+    String motif = '';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('⚠️ Abroger/Résilier le Contrat'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Contrat: ${contrat.referenceContrat}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '⚠️ ATTENTION : Cette action marquera tous les traitements futurs '
+                    'comme "Classé sans suite" et ne peut pas être annulée.',
+                    style: TextStyle(
+                      color: Colors.red,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Date d\'abrogation :'),
+                  const SizedBox(height: 8),
+                  // Sélecteur de date
+                  GestureDetector(
+                    onTap: () async {
+                      final DateTime? picked = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate ?? DateTime.now(),
+                        firstDate: contrat.dateDebut,
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (picked != null) {
+                        setState(() {
+                          selectedDate = picked;
+                        });
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        selectedDate != null
+                            ? DateFormat('dd/MM/yyyy').format(selectedDate!)
+                            : 'Sélectionner une date',
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Motif de l\'abrogation (optionnel) :'),
+                  const SizedBox(height: 8),
+                  TextField(
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                      hintText: 'Raison de la résiliation...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onChanged: (value) {
+                      motif = value;
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Annuler'),
+            ),
+            TextButton(
+              onPressed: () async {
+                if (selectedDate == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Veuillez sélectionner une date'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                  return;
+                }
+
+                Navigator.of(ctx).pop();
+                try {
+                  final success = await context
+                      .read<ContratRepository>()
+                      .abrogateContract(
+                        contratId: contrat.contratId,
+                        abrogationDate: selectedDate!,
+                        motif: motif.isNotEmpty ? motif : null,
+                      );
+
+                  if (!mounted) return;
+
+                  if (success) {
+                    setState(() {
+                      _contratsWithClientsAndTreatments =
+                          _fetchContratsWithDetails();
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          '✅ Contrat ${contrat.referenceContrat} résilié '
+                          'à partir du ${DateFormat('dd/MM/yyyy').format(selectedDate!)}',
+                        ),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          '❌ Erreur lors de la résiliation du contrat',
+                        ),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Erreur: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              child: const Text(
+                '✓ Confirmer l\'abrogation',
+                style: TextStyle(color: Colors.orange),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1305,10 +1616,10 @@ class _ContratCreationFlowScreenState
     final facture = _treatmentFactures[treatmentId];
     if (facture == null) return false;
 
-    // Vérifier que le montant est rempli
-    if ((facture['montant'] as String?) == null ||
-        (facture['montant'] as String).isEmpty)
-      return false;
+    // Vérifier que le montant est rempli et valide
+    final montantStr = (facture['montant'] as String?) ?? '';
+    if (montantStr.isEmpty) return false;
+    if (!NumberFormatter.isValidMontant(montantStr)) return false;
 
     return true;
   }
@@ -1345,10 +1656,15 @@ class _ContratCreationFlowScreenState
     final montantStr = (facture['montant'] as String?) ?? '';
     if (montantStr.isEmpty) return 0;
 
-    final montant = int.tryParse(montantStr) ?? 0;
-    final nombrePlanifications = _calculateNumberOfPlannings(treatmentId);
-
-    return montant * nombrePlanifications;
+    // Utiliser NumberFormatter pour parser les montants avec espaces (ex: "50 000")
+    try {
+      final montant = NumberFormatter.parseMontant(montantStr);
+      final nombrePlanifications = _calculateNumberOfPlannings(treatmentId);
+      return montant * nombrePlanifications;
+    } catch (e) {
+      logger.e('Erreur parsing montant: $montantStr - $e');
+      return 0;
+    }
   }
 
   /// Première carte : Informations du contrat + Sélection des traitements
@@ -2306,23 +2622,25 @@ class _ContratCreationFlowScreenState
               ),
             ),
             const SizedBox(height: 16),
-            // Montant (champ éditable)
+            // Montant (champ éditable) - Accepte les espaces comme séparateurs
             TextField(
               controller: montantController,
-              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              keyboardType: TextInputType.number,
               onChanged: (value) {
                 setState(() {
+                  // Stocker la valeur brute (avec espaces si l'utilisateur les ajoute)
                   facture['montant'] = value;
                 });
               },
               decoration: InputDecoration(
                 labelText: 'Montant unitaire',
-                hintText: 'Ex: 1500.00',
+                hintText: 'Ex: 50 000 ou 1500000',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
-                suffixText: 'MGA',
-                helperText: 'Montant en Ariary par planification',
+                suffixText: 'Ar',
+                helperText:
+                    'Montant en Ariary par planification (espaces autorisés)',
                 helperStyle: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
             ),
@@ -2373,7 +2691,7 @@ class _ContratCreationFlowScreenState
                         style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                       ),
                       Text(
-                        '${(facture['montant'] as String?) ?? '0'} MGA',
+                        '${NumberFormatter.formatMontant(NumberFormatter.parseMontant((facture['montant'] as String?) ?? '0'))} Ar',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.blue[700],
@@ -2496,8 +2814,15 @@ class _ContratCreationFlowScreenState
 
       // Calculs
       final nombrePlanifications = _calculateNumberOfPlannings(treatmentId);
-      final montantUnitaire =
-          int.tryParse((facture['montant'] as String?) ?? '0') ?? 0;
+      // Utiliser NumberFormatter pour parser les montants avec espaces
+      int montantUnitaire = 0;
+      try {
+        montantUnitaire = NumberFormatter.parseMontant(
+          (facture['montant'] as String?) ?? '0',
+        );
+      } catch (e) {
+        montantUnitaire = 0;
+      }
       final totalCoust = _calculateTotalCost(treatmentId);
 
       return Container(
@@ -2907,7 +3232,23 @@ class _ContratCreationFlowScreenState
       // Mapper typeTraitementId → traitementId créé dans la BDD
       final Map<int, int> traitementMap = {};
 
+      logger.i(
+        '🔧 Création des traitements et planifications pour contrat $contratId',
+      );
+      logger.i('   Traitements sélectionnés: ${_selectedTreatments.length}');
+      logger.i('   Planning map size: ${_treatmentPlanning.length}');
+      logger.i('   Facture map size: ${_treatmentFactures.length}');
+
+      if (_treatmentPlanning.isNotEmpty) {
+        logger.i('   Planning keys: ${_treatmentPlanning.keys.toList()}');
+      }
+      if (_treatmentFactures.isNotEmpty) {
+        logger.i('   Facture keys: ${_treatmentFactures.keys.toList()}');
+      }
+
       for (final typeTraitementId in _selectedTreatments) {
+        logger.i('  → Traitement type ID: $typeTraitementId');
+
         // Étape 1: Créer l'enregistrement Traitement dans la BDD
         final createdTraitementId = await context
             .read<ContratRepository>()
@@ -2923,10 +3264,19 @@ class _ContratCreationFlowScreenState
           continue;
         }
 
+        logger.i('    ✅ Traitement créé: ID $createdTraitementId');
+
         traitementMap[typeTraitementId] = createdTraitementId;
 
         final planningData = _treatmentPlanning[typeTraitementId];
         final factureData = _treatmentFactures[typeTraitementId];
+
+        logger.i(
+          '    Planning data: ${planningData != null ? "✅ Présentes" : "❌ MANQUANTES"}',
+        );
+        logger.i(
+          '    Facture data: ${factureData != null ? "✅ Présentes" : "❌ MANQUANTES"}',
+        );
 
         if (planningData != null && factureData != null) {
           // Récupérer les données du planning
@@ -2944,6 +3294,10 @@ class _ContratCreationFlowScreenState
           final redondance =
               int.tryParse((planningData['redondance'] as String?) ?? '1') ?? 1;
 
+          logger.i(
+            '    📅 Params planning: mois=$moisDebut, duree=$dureeTraitement, redondance=$redondance',
+          );
+
           // Créer le planning
           final planningId = await context
               .read<PlanningRepository>()
@@ -2957,6 +3311,7 @@ class _ContratCreationFlowScreenState
 
           if (planningId != -1) {
             planningsCreated++;
+            logger.i('    ✅ Planning créé: ID $planningId');
 
             // Générer les dates du planning automatiquement
             final planningDates = DateUtils.DateUtils.generatePlanningDates(
@@ -2964,6 +3319,8 @@ class _ContratCreationFlowScreenState
               dureeTraitement: dureeTraitement,
               redondance: redondance,
             );
+
+            logger.i('    📅 ${planningDates.length} dates générées');
 
             // Créer un PlanningDetail pour chaque date générée
             // + UNE Facture pour chaque PlanningDetail
@@ -2975,23 +3332,47 @@ class _ContratCreationFlowScreenState
               if (planningDetail != null) {
                 // Créer une facture pour ce PlanningDetail
                 // Référence facture: vide, sera remplie manuellement lors de l'ajout de remarque
-                final montant = (factureData['montant'] as String?) ?? '';
+                final montantStr = (factureData['montant'] as String?) ?? '';
 
-                if (montant.isNotEmpty) {
-                  await context.read<FactureRepository>().createFactureComplete(
-                    planningDetailId: planningDetail.planningDetailId,
-                    referenceFacture: '', // Vide - sera rempli manuellement
-                    montant: int.tryParse(montant) ?? 0,
-                    mode: 'À définir',
-                    etat: 'À venir',
-                    axe: 'À définir',
-                    dateTraitement: date,
-                  );
-                  facturesCreated++;
+                if (montantStr.isNotEmpty) {
+                  try {
+                    // Utiliser NumberFormatter pour parser les montants avec espaces
+                    final montant = NumberFormatter.parseMontant(montantStr);
+
+                    final factureId = await context
+                        .read<FactureRepository>()
+                        .createFactureComplete(
+                          planningDetailId: planningDetail.planningDetailId,
+                          referenceFacture:
+                              '', // Vide - sera rempli manuellement
+                          montant: montant,
+                          mode: 'À définir',
+                          etat: 'À venir',
+                          axe: 'À définir',
+                          dateTraitement: date,
+                        );
+
+                    if (factureId != -1) {
+                      facturesCreated++;
+                      logger.i(
+                        '      ✅ Facture créée: ID $factureId, montant: $montant',
+                      );
+                    }
+                  } catch (e) {
+                    logger.e('❌ Erreur parsing montant: $montantStr - $e');
+                  }
                 }
               }
             }
+          } else {
+            logger.e(
+              '❌ Erreur création planning pour traitement $createdTraitementId',
+            );
           }
+        } else {
+          logger.w(
+            '⚠️ ATTENTION: Pas de planning/facture pour type $typeTraitementId!',
+          );
         }
       }
 
@@ -2999,11 +3380,16 @@ class _ContratCreationFlowScreenState
 
       // Nettoyer les données sauvegardées après succès
       await _clearSavedProgress();
-
-      // Recharger la liste des contrats
       await context.read<ContratRepository>().loadContrats();
+      await context.read<ClientRepository>().loadClients();
+      await context
+          .read<PlanningDetailsRepository>()
+          .loadAllTreatmentsComplete();
+      await context.read<FactureRepository>().loadAllFactures();
 
       Navigator.pop(context);
+
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -3013,6 +3399,12 @@ class _ContratCreationFlowScreenState
           duration: const Duration(seconds: 4),
         ),
       );
+
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) {
+        // La Future a été exécutée et les données sont en cache
+        // Le FutureBuilder va utiliser le cache mis en place par loadContrats()
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

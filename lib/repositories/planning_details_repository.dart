@@ -12,6 +12,7 @@ class PlanningDetailsRepository extends ChangeNotifier {
   List<PlanningDetails> _upcomingTreatments = [];
   List<Map<String, dynamic>> _currentMonthTreatmentsComplete = [];
   List<Map<String, dynamic>> _upcomingTreatmentsComplete = [];
+  List<Map<String, dynamic>> _allTreatmentsComplete = [];
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -22,6 +23,8 @@ class PlanningDetailsRepository extends ChangeNotifier {
       _currentMonthTreatmentsComplete;
   List<Map<String, dynamic>> get upcomingTreatmentsComplete =>
       _upcomingTreatmentsComplete;
+  List<Map<String, dynamic>> get allTreatmentsComplete =>
+      _allTreatmentsComplete;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
@@ -50,7 +53,7 @@ class PlanningDetailsRepository extends ChangeNotifier {
       }
       return null;
     } catch (e) {
-      print('❌ Erreur créer planning_details: $e');
+      logger.e('❌ Erreur créer planning_details: $e');
       rethrow;
     }
   }
@@ -65,7 +68,7 @@ class PlanningDetailsRepository extends ChangeNotifier {
 
       return results.map((row) => PlanningDetails.fromJson(row)).toList();
     } catch (e) {
-      print('❌ Erreur récupérer planning_details: $e');
+      logger.e('❌ Erreur récupérer planning_details: $e');
       return [];
     }
   }
@@ -76,14 +79,19 @@ class PlanningDetailsRepository extends ChangeNotifier {
     String newStatut,
   ) async {
     try {
-      final result = await _db.query(
+      await _db.execute(
         'UPDATE PlanningDetails SET statut = ? WHERE planning_detail_id = ?',
         [newStatut, planningDetailId],
       );
 
-      return result.isNotEmpty;
+      logger.i('✅ Planning detail $planningDetailId statut => $newStatut');
+
+      // ✅ IMPORTANT: Recharger les données après la mise à jour
+      await loadUpcomingTreatmentsComplete();
+
+      return true;
     } catch (e) {
-      print('❌ Erreur mettre à jour planning_details: $e');
+      logger.e('❌ Erreur mettre à jour planning_details: $e');
       return false;
     }
   }
@@ -98,7 +106,7 @@ class PlanningDetailsRepository extends ChangeNotifier {
 
       return result.isNotEmpty;
     } catch (e) {
-      print('❌ Erreur supprimer planning_details: $e');
+      logger.e('❌ Erreur supprimer planning_details: $e');
       return false;
     }
   }
@@ -154,7 +162,7 @@ class PlanningDetailsRepository extends ChangeNotifier {
            FROM PlanningDetails pd
            INNER JOIN Planning p ON pd.planning_id = p.planning_id
            INNER JOIN Traitement t ON p.traitement_id = t.traitement_id
-           INNER JOIN TypeTraitement tt ON t.id_type_traitement = tt.id_type_traitement
+           LEFT JOIN TypeTraitement tt ON t.id_type_traitement = tt.id_type_traitement
            INNER JOIN Contrat ct ON t.contrat_id = ct.contrat_id
            INNER JOIN Client c ON ct.client_id = c.client_id
            WHERE YEAR(pd.date_planification) = ?
@@ -204,7 +212,9 @@ class PlanningDetailsRepository extends ChangeNotifier {
       final today = DateTime.now();
       final todayStr = today.toIso8601String().split('T')[0];
 
-      logger.i('🔍 Chargement COMPLET traitements à venir (après $todayStr)');
+      logger.i(
+        '🔍 Chargement COMPLET traitements à venir (à partir de $todayStr)',
+      );
 
       // ✅ Requête COMPLÈTE: récupère typeTraitement + categorieTraitement + nom + prenom + axe
       final results = await _db.query(
@@ -220,10 +230,10 @@ class PlanningDetailsRepository extends ChangeNotifier {
            FROM PlanningDetails pd
            INNER JOIN Planning p ON pd.planning_id = p.planning_id
            INNER JOIN Traitement t ON p.traitement_id = t.traitement_id
-           INNER JOIN TypeTraitement tt ON t.id_type_traitement = tt.id_type_traitement
+           LEFT JOIN TypeTraitement tt ON t.id_type_traitement = tt.id_type_traitement
            INNER JOIN Contrat ct ON t.contrat_id = ct.contrat_id
            INNER JOIN Client c ON ct.client_id = c.client_id
-           WHERE pd.date_planification > ?
+           WHERE pd.date_planification >= ?
            ORDER BY pd.date_planification ASC''',
         [todayStr],
       );
@@ -249,6 +259,65 @@ class PlanningDetailsRepository extends ChangeNotifier {
     } catch (e) {
       _errorMessage = e.toString();
       logger.e('❌ Erreur charger traitements à venir: $e');
+      return [];
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// ✅ NOUVEAU: Charger TOUS les traitements (effectués + à venir) pour Historique
+  /// IMPORTANT: Charge TOUS les records SANS filtrer par date
+  Future<List<Map<String, dynamic>>> loadAllTreatmentsComplete() async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      logger.i('🔍 Chargement COMPLET tous les traitements (passés + futurs)');
+
+      // ✅ Requête SANS filtre de date - récupère TOUS les traitements
+      final results = await _db.query('''SELECT 
+             pd.planning_detail_id,
+             pd.planning_id,
+             DATE_FORMAT(pd.date_planification, '%Y-%m-%d') as date,
+             pd.date_planification,
+             CONCAT(tt.typeTraitement, ' pour ', c.prenom, ' ', c.nom) as traitement,
+             pd.statut as etat,
+             c.axe,
+             tt.categorieTraitement,
+             tt.id_type_traitement,
+             c.client_id,
+             ct.contrat_id
+           FROM PlanningDetails pd
+           INNER JOIN Planning p ON pd.planning_id = p.planning_id
+           INNER JOIN Traitement t ON p.traitement_id = t.traitement_id
+           LEFT JOIN TypeTraitement tt ON t.id_type_traitement = tt.id_type_traitement
+           INNER JOIN Contrat ct ON t.contrat_id = ct.contrat_id
+           INNER JOIN Client c ON ct.client_id = c.client_id
+           ORDER BY pd.date_planification DESC''');
+
+      logger.i('✅ Reçu ${results.length} traitements (tous les statuts)');
+      if (results.isNotEmpty) {
+        logger.d('Colonnes: ${results.first.keys.toList()}');
+        logger.d(
+          'Nombre d\'effectués: ${results.where((r) => (r['etat'] as String?)?.contains('Effectué') ?? false).length}',
+        );
+        logger.d(
+          'Nombre d\'à venir: ${results.where((r) => (r['etat'] as String?)?.contains('À venir') ?? false).length}',
+        );
+      }
+
+      final completeData = results.cast<Map<String, dynamic>>();
+      _allTreatmentsComplete = completeData;
+
+      logger.i(
+        '✅ ${_allTreatmentsComplete.length} traitements totaux chargés (tous les statuts)',
+      );
+      return completeData;
+    } catch (e) {
+      _errorMessage = e.toString();
+      logger.e('❌ Erreur charger tous les traitements: $e');
       return [];
     } finally {
       _isLoading = false;
