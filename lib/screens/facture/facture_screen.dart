@@ -55,69 +55,101 @@ class _FactureScreenState extends State<FactureScreen> {
         .toList();
   }
 
+  /// Construit l'en-tête avec gradient et barre de recherche
+  Widget _buildHeader(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.blue[600]!, Colors.blue[400]!],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(16),
+          bottomRight: Radius.circular(16),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Barre de recherche avec bouton d'actualisation
+          Row(
+            children: [
+              // Barre de recherche
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Rechercher par client ou traitement...',
+                    hintStyle: const TextStyle(color: Colors.white70),
+                    prefixIcon: const Icon(Icons.search, color: Colors.white70),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {
+                                _searchQuery = '';
+                              });
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.2),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                  ),
+                  style: const TextStyle(color: Colors.white),
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Bouton d'actualisation
+              Tooltip(
+                message: 'Actualiser',
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.25),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.refresh, color: Colors.white),
+                    onPressed: () {
+                      _searchQuery = '';
+                      _searchController.clear();
+                      context.read<FactureRepository>().loadAllFactures();
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'facture_refresh',
-        onPressed: () {
-          context.read<FactureRepository>().loadAllFactures();
-        },
-        tooltip: 'Actualiser',
-        child: const Icon(Icons.refresh),
-      ),
       body: Consumer<FactureRepository>(
         builder: (context, factureRepo, _) {
           return SingleChildScrollView(
             child: Column(
               children: [
-                // En-tête avec titre
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  color: AppTheme.primaryBlue,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Barre de recherche moderne
-                      TextField(
-                        controller: _searchController,
-                        onChanged: (value) {
-                          setState(() {
-                            _searchQuery = value;
-                          });
-                        },
-                        decoration: InputDecoration(
-                          filled: true,
-                          fillColor: Colors.white,
-                          hintText: 'Rechercher par client ou traitement...',
-                          prefixIcon: const Icon(
-                            Icons.search,
-                            color: Colors.grey,
-                          ),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear),
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(() {
-                                      _searchQuery = '';
-                                    });
-                                  },
-                                )
-                              : null,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide.none,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                // En-tête avec gradient et barre de recherche
+                _buildHeader(context),
 
                 // Liste des factures
                 Padding(
@@ -401,11 +433,12 @@ class _FactureDetailScreenState extends State<_FactureDetailScreen> {
                   controller: prixNewCtrl,
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
-                    hintText: 'Entrez le nouveau prix',
+                    hintText: 'Ex: 50 000 ou 1500000',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
                     contentPadding: const EdgeInsets.all(12),
+                    helperText: 'Les espaces sont autorisés',
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -492,8 +525,7 @@ class _FactureDetailScreenState extends State<_FactureDetailScreen> {
                     ),
                   );
 
-                  // Recharger les factures pour refléter les changements
-                  await Future.delayed(const Duration(milliseconds: 500));
+                  // ✅ CORRECTION: Recharger les données directement sans délai arbitraire
                   if (mounted) {
                     await context.read<FactureRepository>().loadAllFactures();
                   }
