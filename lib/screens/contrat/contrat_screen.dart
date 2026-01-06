@@ -26,6 +26,7 @@ class _ContratScreenState extends State<ContratScreen> {
   late Future<List<Map<String, dynamic>>> _contratsWithClientsAndTreatments;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  final logger = Logger();
 
   @override
   void initState() {
@@ -360,12 +361,12 @@ class _ContratScreenState extends State<ContratScreen> {
     final clientPhone = client?.telephone ?? 'N/A';
 
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 0),
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
       elevation: 2,
       child: InkWell(
         onTap: () => _showContratDetails(contrat, client, numTraitements),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -377,7 +378,7 @@ class _ContratScreenState extends State<ContratScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
 
               // Ligne 2: Date contrat et nombre de traitements
               Row(
@@ -390,7 +391,7 @@ class _ContratScreenState extends State<ContratScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 4,
+                      vertical: 2,
                     ),
                     decoration: BoxDecoration(
                       color: Colors.blue[100],
@@ -407,7 +408,7 @@ class _ContratScreenState extends State<ContratScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 6),
 
               // Ligne 3: Email et Téléphone
               Row(
@@ -658,7 +659,6 @@ class _ContratScreenState extends State<ContratScreen> {
 
   /// Éditer les informations du client
   void _editClient(Client client) {
-    // TODO: Ouvrir l'écran de modification du client
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Modification du client ${client.nom} en cours...'),
@@ -669,11 +669,233 @@ class _ContratScreenState extends State<ContratScreen> {
 
   /// Voir les factures du contrat
   void _viewFactures(Contrat contrat) {
-    // TODO: Ouvrir l'écran des factures
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Factures du contrat ${contrat.referenceContrat}'),
-        duration: const Duration(seconds: 2),
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Factures du Contrat'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: FutureBuilder<List<Facture>>(
+            future: context.read<FactureRepository>().loadFacturesForContrat(
+              contrat.contratId,
+            ),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              if (snapshot.hasError) {
+                return Text('Erreur: ${snapshot.error}');
+              }
+
+              final factures = snapshot.data ?? [];
+
+              if (factures.isEmpty) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.receipt_long,
+                      size: 48,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Aucune facture trouvée'),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.build),
+                      label: const Text('Réparer Factures'),
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _repairFactures(contrat);
+                      },
+                    ),
+                  ],
+                );
+              }
+
+              return ListView.builder(
+                shrinkWrap: true,
+                itemCount: factures.length,
+                itemBuilder: (context, index) {
+                  final f = factures[index];
+                  return ListTile(
+                    title: Text('Facture #${f.factureId}'),
+                    subtitle: Text('${f.montant} Ar - ${f.etat}'),
+                    trailing: Text(f.dateTraitement.toString().split(' ')[0]),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Fermer'),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.build),
+            label: const Text('Réparer'),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _repairFactures(contrat);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Réparer les factures d'un contrat
+  void _repairFactures(Contrat contrat) {
+    // Charger les traitements du contrat
+    _loadTraitements(contrat.contratId).then((traitements) {
+      if (traitements.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ Aucun traitement trouvé pour ce contrat'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('🔧 Réparer Factures'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Sélectionnez le traitement à réparer:'),
+                const SizedBox(height: 16),
+                // Liste des traitements sans ListView
+                ...traitements.map(
+                  (t) => ListTile(
+                    title: Text(t['nom'] ?? 'Traitement'),
+                    subtitle: Text('Type: ${t['type'] ?? '-'}'),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      _showRepairDialog(
+                        contrat: contrat,
+                        traitementId: t['traitement_id'] as int,
+                        traitementName: t['nom'] ?? 'Traitement',
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Annuler'),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  /// Afficher le formulaire de réparation avec prix
+  void _showRepairDialog({
+    required Contrat contrat,
+    required int traitementId,
+    required String traitementName,
+  }) {
+    final prixController = TextEditingController();
+    final referenceController = TextEditingController(
+      text: 'REF-${DateTime.now().millisecondsSinceEpoch}',
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🔧 Détails Réparation'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Traitement: $traitementName'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: prixController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Prix (Ar)',
+                hintText: '50000',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: referenceController,
+              readOnly: true,
+              decoration: const InputDecoration(
+                labelText: 'Référence (auto-générée)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Annuler'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final prixStr = prixController.text.trim();
+              if (prixStr.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('❌ Veuillez entrer un prix'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+
+              try {
+                final prix = int.parse(prixStr);
+                Navigator.of(ctx).pop();
+
+                final count = await context
+                    .read<FactureRepository>()
+                    .regenerateFacturesForTraitement(
+                      traitementId: traitementId,
+                      montant: prix,
+                      referencePrefix: referenceController.text,
+                      deleteExisting: false,
+                    );
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✅ $count factures créées/restaurées'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  _reloadData();
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('❌ Erreur: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Réparer'),
+          ),
+        ],
       ),
     );
   }
@@ -2631,6 +2853,7 @@ class _ContratCreationFlowScreenState
                   // Stocker la valeur brute (avec espaces si l'utilisateur les ajoute)
                   facture['montant'] = value;
                 });
+                _saveProgress();
               },
               decoration: InputDecoration(
                 labelText: 'Montant unitaire',
@@ -3246,6 +3469,21 @@ class _ContratCreationFlowScreenState
         logger.i('   Facture keys: ${_treatmentFactures.keys.toList()}');
       }
 
+      // ✅ Charger l'axe du client pour l'utiliser dans les factures
+      String? clientAxe;
+      try {
+        final clientRepo = context.read<ClientRepository>();
+        final clientIndex = clientRepo.clients.indexWhere(
+          (c) => c.clientId == clientId,
+        );
+        if (clientIndex != -1) {
+          clientAxe = clientRepo.clients[clientIndex].axe;
+          logger.i('   ✅ Axe du client: $clientAxe');
+        }
+      } catch (e) {
+        logger.e('   ⚠️ Erreur récupération axe client: $e');
+      }
+
       for (final typeTraitementId in _selectedTreatments) {
         logger.i('  → Traitement type ID: $typeTraitementId');
 
@@ -3278,100 +3516,167 @@ class _ContratCreationFlowScreenState
           '    Facture data: ${factureData != null ? "✅ Présentes" : "❌ MANQUANTES"}',
         );
 
-        if (planningData != null && factureData != null) {
-          // Récupérer les données du planning
-          // Extraire le mois du texte "Janvier 2025"
-          final moisDebutStr =
-              (planningData['moisDebut'] as String?) ?? 'Janvier 1';
-          final moisDebutWords = moisDebutStr.split(' ');
-          final moisDebut = _moisToInt(moisDebutWords[0]);
+        // ✅ DEBUG: Afficher le contenu de factureData
+        if (factureData != null) {
+          logger.i('    Facture content: $factureData');
+          logger.i('    Montant value: ${factureData['montant']}');
+        }
 
-          final dureeTraitement =
-              int.tryParse(
-                (planningData['dureeTraitement'] as String?) ?? '12',
-              ) ??
-              12;
-          final redondance =
-              int.tryParse((planningData['redondance'] as String?) ?? '1') ?? 1;
-
-          logger.i(
-            '    📅 Params planning: mois=$moisDebut, duree=$dureeTraitement, redondance=$redondance',
+        // ✅ VALIDATION: Si données manquantes, skip ce traitement
+        if (planningData == null) {
+          logger.e(
+            '    ❌ SKIP: Planning data manquantes pour traitement $typeTraitementId',
           );
+          continue;
+        }
+        if (factureData == null) {
+          logger.e(
+            '    ❌ SKIP: Facture data manquantes pour traitement $typeTraitementId',
+          );
+          continue;
+        }
 
-          // Créer le planning
-          final planningId = await context
-              .read<PlanningRepository>()
-              .createPlanning(
-                traitementId: createdTraitementId,
-                dateDebutPlanification: dateDebutParsed,
-                moisDebut: moisDebut,
-                dureeTraitement: dureeTraitement,
-                redondance: redondance,
-              );
+        // Récupérer les données du planning
+        // Extraire le mois du texte "Janvier 2025"
+        final moisDebutStr =
+            (planningData['moisDebut'] as String?) ?? 'Janvier 1';
+        final moisDebutWords = moisDebutStr.split(' ');
+        final moisDebut = _moisToInt(moisDebutWords[0]);
 
-          if (planningId != -1) {
-            planningsCreated++;
-            logger.i('    ✅ Planning créé: ID $planningId');
+        final dureeTraitement =
+            int.tryParse(
+              (planningData['dureeTraitement'] as String?) ?? '12',
+            ) ??
+            12;
+        final redondance =
+            int.tryParse((planningData['redondance'] as String?) ?? '1') ?? 1;
 
-            // Générer les dates du planning automatiquement
-            final planningDates = DateUtils.DateUtils.generatePlanningDates(
-              dateDebut: dateDebutParsed,
+        logger.i(
+          '    📅 Params planning: mois=$moisDebut, duree=$dureeTraitement, redondance=$redondance',
+        );
+
+        // Créer le planning
+        final planningId = await context
+            .read<PlanningRepository>()
+            .createPlanning(
+              traitementId: createdTraitementId,
+              dateDebutPlanification: dateDebutParsed,
+              moisDebut: moisDebut,
               dureeTraitement: dureeTraitement,
               redondance: redondance,
             );
 
-            logger.i('    📅 ${planningDates.length} dates générées');
+        if (planningId != -1) {
+          planningsCreated++;
+          logger.i('    ✅ Planning créé: ID $planningId');
 
-            // Créer un PlanningDetail pour chaque date générée
-            // + UNE Facture pour chaque PlanningDetail
-            for (final date in planningDates) {
-              final planningDetail = await context
-                  .read<PlanningDetailsRepository>()
-                  .createPlanningDetails(planningId, date, statut: 'À venir');
+          // ✅ Utiliser la date de planification sélectionnée par l'utilisateur!
+          logger.i('    🔍 DEBUG planningData: $planningData');
+          logger.i(
+            '    🔍 datePlanification type: ${planningData['datePlanification'].runtimeType}',
+          );
+          logger.i(
+            '    🔍 datePlanification value: ${planningData['datePlanification']}',
+          );
 
-              if (planningDetail != null) {
-                // Créer une facture pour ce PlanningDetail
-                // Référence facture: vide, sera remplie manuellement lors de l'ajout de remarque
-                final montantStr = (factureData['montant'] as String?) ?? '';
+          final datePlanificationSelected =
+              planningData['datePlanification'] is DateTime
+              ? planningData['datePlanification'] as DateTime
+              : DateTime.now();
 
-                if (montantStr.isNotEmpty) {
-                  try {
-                    // Utiliser NumberFormatter pour parser les montants avec espaces
-                    final montant = NumberFormatter.parseMontant(montantStr);
+          logger.i(
+            '    📅 Date de planification sélectionnée: ${datePlanificationSelected.day}/${datePlanificationSelected.month}/${datePlanificationSelected.year}',
+          );
 
-                    final factureId = await context
-                        .read<FactureRepository>()
-                        .createFactureComplete(
-                          planningDetailId: planningDetail.planningDetailId,
-                          referenceFacture:
-                              '', // Vide - sera rempli manuellement
-                          montant: montant,
-                          mode: 'À définir',
-                          etat: 'À venir',
-                          axe: 'À définir',
-                          dateTraitement: date,
-                        );
+          // Générer les dates du planning automatiquement
+          final planningDates = DateUtils.DateUtils.generatePlanningDates(
+            dateDebut: datePlanificationSelected,
+            dureeTraitement: dureeTraitement,
+            redondance: redondance,
+          );
 
-                    if (factureId != -1) {
-                      facturesCreated++;
-                      logger.i(
-                        '      ✅ Facture créée: ID $factureId, montant: $montant',
-                      );
-                    }
-                  } catch (e) {
-                    logger.e('❌ Erreur parsing montant: $montantStr - $e');
-                  }
+          logger.i(
+            '    📅 ${planningDates.length} dates générées (à partir du ${datePlanificationSelected.day}/${datePlanificationSelected.month}/${datePlanificationSelected.year})',
+          );
+
+          if (planningDates.isEmpty) {
+            logger.w('    ⚠️ AUCUNE DATE GÉNÉRÉE! Vérifier les paramètres!');
+            logger.i(
+              '    dureeTraitement=$dureeTraitement, redondance=$redondance',
+            );
+            continue; // ✅ Skip ce traitement si aucune date
+          }
+
+          // Créer un PlanningDetail pour chaque date générée
+          // + UNE Facture pour chaque PlanningDetail
+          for (final date in planningDates) {
+            logger.i('      📍 Création planning detail pour date: $date');
+
+            final planningDetail = await context
+                .read<PlanningDetailsRepository>()
+                .createPlanningDetails(planningId, date, statut: 'À venir');
+
+            logger.i(
+              '      🔍 Planning detail null? ${planningDetail == null}',
+            );
+
+            if (planningDetail != null) {
+              logger.i(
+                '        ✅ PlanningDetail créé: ID ${planningDetail.planningDetailId}',
+              );
+              // Créer une facture pour ce PlanningDetail
+              // Référence facture: vide, sera remplie manuellement lors de l'ajout de remarque
+              final montantStr = (factureData['montant'] as String?) ?? '';
+              logger.i('        💰 Montant brut: "$montantStr"');
+
+              int montant = 0;
+              if (montantStr.isNotEmpty) {
+                try {
+                  // Utiliser NumberFormatter pour parser les montants avec espaces
+                  montant = NumberFormatter.parseMontant(montantStr);
+                  logger.i('        ✅ Montant parsé: $montant Ar');
+                } catch (e) {
+                  logger.e(
+                    '        ❌ Erreur parsing montant: $montantStr - $e',
+                  );
+                  montant = 0;
                 }
+              } else {
+                logger.i('        ⚠️ Montant vide, utilisation de 0 Ar');
+              }
+
+              try {
+                final factureId = await context
+                    .read<FactureRepository>()
+                    .createFactureComplete(
+                      planningDetailId: planningDetail.planningDetailId,
+                      referenceFacture: '', // Vide - sera rempli manuellement
+                      montant: montant,
+                      mode:
+                          null, // ✅ Mode à définir plus tard (pas de valeur par défaut)
+                      etat: 'À venir',
+                      axe: clientAxe, // ✅ Axe du client
+                      dateTraitement: date,
+                    );
+
+                if (factureId != -1) {
+                  facturesCreated++;
+                  logger.i(
+                    '      ✅ Facture créée: ID $factureId, montant: $montant Ar',
+                  );
+                } else {
+                  logger.e(
+                    '❌ Erreur lors de la création facture pour planning_detail ${planningDetail.planningDetailId}',
+                  );
+                }
+              } catch (e) {
+                logger.e('❌ Exception création facture: $e');
               }
             }
-          } else {
-            logger.e(
-              '❌ Erreur création planning pour traitement $createdTraitementId',
-            );
           }
         } else {
-          logger.w(
-            '⚠️ ATTENTION: Pas de planning/facture pour type $typeTraitementId!',
+          logger.e(
+            '❌ Erreur création planning pour traitement $createdTraitementId',
           );
         }
       }
