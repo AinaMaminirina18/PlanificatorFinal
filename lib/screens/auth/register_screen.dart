@@ -98,17 +98,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     borderRadius: BorderRadius.circular(20),
                     child: Image.asset(
                       'assets/Pictures/Logo Planificator.png',
-                      height: 100,
-                      width: 100,
+                      height: 200,
+                      width: 200,
                       fit: BoxFit.cover,
                     ),
                   ),
-                  const SizedBox(height: 16),
                   // Titre
                   Text(
                     'Inscription',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      color: Colors.white,
+                      color: Colors.blue.shade800,
                       fontWeight: FontWeight.bold,
                       fontSize: 24,
                     ),
@@ -118,7 +117,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   Text(
                     'Créer un nouveau compte',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.white70,
+                      color: Colors.blue.shade800,
                       fontSize: 12,
                     ),
                     textAlign: TextAlign.center,
@@ -127,7 +126,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                   // Conteneur avec largeur max
                   SizedBox(
-                    width: 280,
+                    width: 350,
                     child: Column(
                       children: [
                         // Username Field
