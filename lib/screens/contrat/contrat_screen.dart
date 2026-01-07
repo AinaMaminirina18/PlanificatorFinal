@@ -222,7 +222,6 @@ class _ContratScreenState extends State<ContratScreen> {
         ],
       ),
     );
-    
   }
 
   @override
@@ -342,7 +341,7 @@ class _ContratScreenState extends State<ContratScreen> {
       floatingActionButton: FloatingActionButton.extended(
         heroTag: 'contrat_add',
         onPressed: _showAddContratDialog,
-        label: const Text('Ajout un contrat'),
+        label: const Text('Ajouter un contrat'),
         icon: const Icon(Icons.add),
       ),
     );
