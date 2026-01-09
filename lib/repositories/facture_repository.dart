@@ -623,18 +623,16 @@ class FactureRepository extends ChangeNotifier {
       }
 
       // Générer et sauvegarder l'Excel
-      final filePath = await ExcelUtils.generateAndSaveInvoiceExcel(
-        data: excelData,
-        clientFullName: clientName,
-        clientCategory: 'N/A',
-        clientAxis: 'N/A',
-        clientAddress: 'N/A',
-        clientPhone: 'N/A',
-        contractReference: 'N/A',
+      final excelService = ExcelService();
+      await excelService.genererFactureExcel(
+        excelData,
+        clientName,
+        DateTime.now().year,
+        DateTime.now().month,
       );
 
-      logger.i('Export Excel généré: $filePath');
-      return filePath;
+      logger.i('Export Excel généré pour le client: $clientName');
+      return 'Export généré avec succès';
     } catch (e) {
       _errorMessage = e.toString();
       logger.e('Erreur lors de la génération Excel: $e');
@@ -835,8 +833,7 @@ class FactureRepository extends ChangeNotifier {
     final dateFin = _addMonths(dateDebut, dureeTraitement);
     DateTime currentDate = dateDebut;
 
-    while (currentDate.isBefore(dateFin) ||
-        currentDate.isAtSameMomentAs(dateFin)) {
+    while (currentDate.isBefore(dateFin)) {
       dates.add(currentDate);
       currentDate = _addMonths(currentDate, redondance);
     }
