@@ -383,7 +383,12 @@ class _ContratScreenState extends State<ContratScreen> {
     final dateFormat = DateFormat('dd/MM/yyyy');
     final clientName = client?.nom ?? 'Client inconnu';
     final clientPrenom = client?.prenom ?? '';
-    final fullName = '$clientName $clientPrenom'.trim();
+    // Pour Société et Organisation, afficher uniquement le Nom
+    final isSocieteOrganisation =
+        client?.categorie == 'Société' || client?.categorie == 'Organisation';
+    final fullName = isSocieteOrganisation
+        ? clientName
+        : '$clientName $clientPrenom'.trim();
     final clientEmail = client?.email ?? 'N/A';
     final clientPhone = client?.telephone ?? 'N/A';
 
@@ -478,7 +483,7 @@ class _ContratScreenState extends State<ContratScreen> {
       builder: (BuildContext ctx) => AlertDialog(
         title: const Text('Détails du Contrat'),
         content: SizedBox(
-          width: double.maxFinite,
+          width: 550,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -491,7 +496,7 @@ class _ContratScreenState extends State<ContratScreen> {
                 if (client != null) ...[
                   _buildDetailRow('Nom', client.nom),
                   _buildDetailRow(
-                    'Prénom',
+                    client.prenomLabel,
                     client.prenom.isNotEmpty ? client.prenom : '-',
                   ),
                   _buildDetailRow('Email', client.email),
@@ -595,6 +600,112 @@ class _ContratScreenState extends State<ContratScreen> {
                     );
                   },
                 ),
+                const SizedBox(height: 16),
+
+                // ═════════════════════════════════════════
+                // SECTION: STATISTIQUES PAR TRAITEMENT
+                // ═════════════════════════════════════════
+                _buildSectionHeader('📊 STATISTIQUES PAR TRAITEMENT'),
+                FutureBuilder<List<Map<String, dynamic>>>(
+                  future: _loadTraitementStatistics(contrat.contratId),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Padding(
+                        padding: EdgeInsets.all(8.0),
+                        child: CircularProgressIndicator(),
+                      );
+                    }
+
+                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return const Padding(
+                        padding: EdgeInsets.all(8.0),
+                        child: Text('Aucune statistique disponible'),
+                      );
+                    }
+
+                    final stats = snapshot.data!;
+                    return ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: stats.length,
+                      itemBuilder: (context, index) {
+                        final stat = stats[index];
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[50],
+                            border: Border.all(color: Colors.blue[200]!),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                stat['nom'] ?? 'Traitement',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    '📅 Planifications: ${stat['planifications'] ?? 0}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                  Text(
+                                    '💰 ${stat['montantTotal'] ?? 0} MGA',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green[700],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    '📄 Factures: ${stat['factures'] ?? 0}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                  Text(
+                                    '💬 Remarques: ${stat['remarques'] ?? 0}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '📋 Historiques: ${stat['historiques'] ?? 0}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[700],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -685,6 +796,141 @@ class _ContratScreenState extends State<ContratScreen> {
     }
   }
 
+  /// Charger les statistiques pour chaque traitement
+  Future<List<Map<String, dynamic>>> _loadTraitementStatistics(
+    int contratId,
+  ) async {
+    try {
+      final db = DatabaseService();
+
+      // Récupérer tous les traitements du contrat
+      final traitements = await _loadTraitements(contratId);
+      final stats = <Map<String, dynamic>>[];
+
+      for (final t in traitements) {
+        final traitementId = t['traitement_id'] as int?;
+        if (traitementId == null) continue;
+
+        int plannings = 0;
+        int factures = 0;
+        int remarques = 0;
+        int historiques = 0;
+        int montantTotal = 0;
+
+        try {
+          // Compter les planifications
+          const sqlPlannings = '''
+            SELECT COUNT(*) as count FROM Planning WHERE traitement_id = ?
+          ''';
+          final planningsResult = await db.query(sqlPlannings, [traitementId]);
+          plannings =
+              (planningsResult.isNotEmpty
+                  ? planningsResult[0]['count'] as int?
+                  : 0) ??
+              0;
+        } catch (e) {
+          logger.w('Erreur comptage planifications: $e');
+          plannings = 0;
+        }
+
+        try {
+          // Compter les factures
+          const sqlFactures = '''
+            SELECT COUNT(*) as count FROM Facture f
+            INNER JOIN PlanningDetails pd ON f.planning_detail_id = pd.planning_detail_id
+            INNER JOIN Planning p ON pd.planning_id = p.planning_id
+            WHERE p.traitement_id = ?
+          ''';
+          final facturesResult = await db.query(sqlFactures, [traitementId]);
+          factures =
+              (facturesResult.isNotEmpty
+                  ? facturesResult[0]['count'] as int?
+                  : 0) ??
+              0;
+        } catch (e) {
+          logger.w('Erreur comptage factures: $e');
+          factures = 0;
+        }
+
+        try {
+          // Compter les remarques via planning_detail_id
+          const sqlRemarques = '''
+            SELECT COUNT(*) as count FROM Remarque r
+            INNER JOIN PlanningDetails pd ON r.planning_detail_id = pd.planning_detail_id
+            INNER JOIN Planning p ON pd.planning_id = p.planning_id
+            WHERE p.traitement_id = ?
+          ''';
+          final remarquesResult = await db.query(sqlRemarques, [traitementId]);
+          remarques =
+              (remarquesResult.isNotEmpty
+                  ? remarquesResult[0]['count'] as int?
+                  : 0) ??
+              0;
+        } catch (e) {
+          logger.w('Erreur comptage remarques: $e');
+          remarques = 0;
+        }
+
+        try {
+          // Compter les historiques (table Historique, pas HistoriqueEvent)
+          const sqlHistoriques = '''
+            SELECT COUNT(*) as count FROM Historique h
+            WHERE h.facture_id IN (
+              SELECT f.facture_id FROM Facture f
+              INNER JOIN PlanningDetails pd ON f.planning_detail_id = pd.planning_detail_id
+              INNER JOIN Planning p ON pd.planning_id = p.planning_id
+              WHERE p.traitement_id = ?
+            )
+          ''';
+          final historiquesResult = await db.query(sqlHistoriques, [
+            traitementId,
+          ]);
+          historiques =
+              (historiquesResult.isNotEmpty
+                  ? historiquesResult[0]['count'] as int?
+                  : 0) ??
+              0;
+        } catch (e) {
+          logger.w('Erreur comptage historiques: $e');
+          historiques = 0;
+        }
+
+        try {
+          // Calculer le montant total (montant est un double)
+          const sqlMontant = '''
+            SELECT COALESCE(SUM(CAST(f.montant AS DECIMAL(10,2))), 0) as total FROM Facture f
+            INNER JOIN PlanningDetails pd ON f.planning_detail_id = pd.planning_detail_id
+            INNER JOIN Planning p ON pd.planning_id = p.planning_id
+            WHERE p.traitement_id = ?
+          ''';
+          final montantResult = await db.query(sqlMontant, [traitementId]);
+          montantTotal =
+              (montantResult.isNotEmpty
+                  ? (montantResult[0]['total'] as num?)?.toInt() ?? 0
+                  : 0) ??
+              0;
+        } catch (e) {
+          logger.w('Erreur calcul montant: $e');
+          montantTotal = 0;
+        }
+
+        stats.add({
+          'nom': t['nom'] ?? 'Traitement',
+          'planifications': plannings,
+          'factures': factures,
+          'remarques': remarques,
+          'historiques': historiques,
+          'montantTotal': montantTotal,
+        });
+      }
+
+      return stats;
+    } catch (e) {
+      logger.e('Erreur chargement statistiques: $e');
+      return [];
+    }
+  }
+
   /// Éditer les informations du client
   void _editClient(Client client) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -695,18 +941,16 @@ class _ContratScreenState extends State<ContratScreen> {
     );
   }
 
-  /// Voir les factures du contrat
+  /// Voir les factures du contrat (groupées par type de traitement)
   void _viewFactures(Contrat contrat) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Factures du Contrat'),
         content: SizedBox(
-          width: double.maxFinite,
-          child: FutureBuilder<List<Facture>>(
-            future: context.read<FactureRepository>().loadFacturesForContrat(
-              contrat.contratId,
-            ),
+          width: 550,
+          child: FutureBuilder<Map<String, List<Map<String, dynamic>>>>(
+            future: _loadFacturesGroupedByTraitement(contrat.contratId),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -716,41 +960,183 @@ class _ContratScreenState extends State<ContratScreen> {
                 return Text('Erreur: ${snapshot.error}');
               }
 
-              final factures = snapshot.data ?? [];
+              final facturesGrouped = snapshot.data ?? {};
 
-              if (factures.isEmpty) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.receipt_long,
-                      size: 48,
-                      color: Colors.grey,
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('Aucune facture trouvée'),
-                    const SizedBox(height: 16),
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.build),
-                      label: const Text('Réparer Factures'),
-                      onPressed: () {
-                        Navigator.of(ctx).pop();
-                        _repairFactures(contrat);
-                      },
-                    ),
-                  ],
+              if (facturesGrouped.isEmpty) {
+                // Aucune facture trouvée → afficher liste des traitements
+                return FutureBuilder<List<Map<String, dynamic>>>(
+                  future: _loadTraitements(contrat.contratId),
+                  builder: (context, traitementSnapshot) {
+                    if (traitementSnapshot.connectionState ==
+                        ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    final traitements = traitementSnapshot.data ?? [];
+
+                    if (traitements.isEmpty) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.receipt_long,
+                            size: 48,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(height: 16),
+                          const Text('Aucune facture trouvée'),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Aucun traitement disponible',
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                        ],
+                      );
+                    }
+
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Aucune facture pour ce contrat',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Choisissez un traitement à réparer:',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        const SizedBox(height: 8),
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: traitements.length,
+                          itemBuilder: (context, index) {
+                            final traitement = traitements[index];
+                            final nom = traitement['nom'] ?? 'Traitement';
+                            final type = traitement['type'] ?? '-';
+                            final traitementId =
+                                traitement['traitement_id'] as int;
+
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                title: Text(nom),
+                                subtitle: Text('Type: $type'),
+                                trailing: const Icon(
+                                  Icons.arrow_forward_ios,
+                                  size: 16,
+                                ),
+                                onTap: () {
+                                  Navigator.of(ctx).pop();
+                                  _showRepairDialog(
+                                    contrat: contrat,
+                                    traitementId: traitementId,
+                                    traitementName: nom,
+                                  );
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    );
+                  },
                 );
               }
 
               return ListView.builder(
                 shrinkWrap: true,
-                itemCount: factures.length,
+                itemCount: facturesGrouped.length,
                 itemBuilder: (context, index) {
-                  final f = factures[index];
-                  return ListTile(
-                    title: Text('Facture #${f.factureId}'),
-                    subtitle: Text('${f.montant} Ar - ${f.etat}'),
-                    trailing: Text(f.dateTraitement.toString().split(' ')[0]),
+                  final traitementType = facturesGrouped.keys.elementAt(index);
+                  final factures = facturesGrouped[traitementType] ?? [];
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header du type de traitement
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[100],
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              traitementType,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                color: Colors.blue[900],
+                              ),
+                            ),
+                            Text(
+                              '${factures.length} facture(s)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue[700],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // Liste des factures pour ce traitement
+                      ...factures.map((f) {
+                        final dateStr = DateFormat(
+                          'EEEE dd MMMM yyyy',
+                          'fr_FR',
+                        ).format(f['dateTraitement'] as DateTime);
+                        final parts = dateStr.split(' ');
+                        if (parts.isNotEmpty) {
+                          parts[0] =
+                              parts[0][0].toUpperCase() + parts[0].substring(1);
+                        }
+                        if (parts.length > 2) {
+                          parts[2] =
+                              parts[2][0].toUpperCase() + parts[2].substring(1);
+                        }
+                        final capitalizedDate = parts.join(' ');
+
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          title: Text('Facture #${f['factureId']}'),
+                          subtitle: Text('${f['montant']} Ar - ${f['etat']}'),
+                          trailing: Text(
+                            capitalizedDate,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 12),
+                      // Bouton réparer pour ce groupe
+                      Row(
+                        children: [
+                          const SizedBox(width: 8),
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.build, size: 18),
+                            label: const Text('Réparer ce traitement'),
+                            onPressed: () {
+                              _repairTreatmentType(contrat, traitementType);
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                   );
                 },
               );
@@ -762,17 +1148,108 @@ class _ContratScreenState extends State<ContratScreen> {
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Fermer'),
           ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.build),
-            label: const Text('Réparer'),
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              _repairFactures(contrat);
-            },
-          ),
         ],
       ),
     );
+  }
+
+  /// Réparer les factures d'un type de traitement spécifique
+  Future<void> _repairTreatmentType(
+    Contrat contrat,
+    String traitementType,
+  ) async {
+    try {
+      final db = DatabaseService();
+
+      // Récupérer le traitement ID pour ce type
+      const sql = '''
+        SELECT t.traitement_id, t.contrat_id
+        FROM Traitement t
+        INNER JOIN TypeTraitement tt ON t.id_type_traitement = tt.id_type_traitement
+        WHERE t.contrat_id = ? AND tt.typeTraitement = ?
+        LIMIT 1
+      ''';
+
+      final results = await db.query(sql, [contrat.contratId, traitementType]);
+
+      if (results.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Traitement non trouvé'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final traitementId = results[0]['traitement_id'] as int;
+
+      // Afficher le dialog de réparation avec le traitement pré-sélectionné
+      if (mounted) {
+        _showRepairDialog(
+          contrat: contrat,
+          traitementId: traitementId,
+          traitementName: traitementType,
+        );
+      }
+    } catch (e) {
+      logger.e('Erreur lors de la recherche du traitement: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  /// Charger les factures groupées par type de traitement
+  Future<Map<String, List<Map<String, dynamic>>>>
+  _loadFacturesGroupedByTraitement(int contratId) async {
+    try {
+      final db = DatabaseService();
+      const sql = '''
+        SELECT DISTINCT 
+          f.facture_id, 
+          f.montant, 
+          f.date_traitement,
+          f.etat,
+          tt.typeTraitement
+        FROM Facture f
+        INNER JOIN PlanningDetails pd ON f.planning_detail_id = pd.planning_detail_id
+        INNER JOIN Planning p ON pd.planning_id = p.planning_id
+        INNER JOIN Traitement t ON p.traitement_id = t.traitement_id
+        INNER JOIN TypeTraitement tt ON t.id_type_traitement = tt.id_type_traitement
+        WHERE t.contrat_id = ?
+        ORDER BY tt.typeTraitement ASC, f.date_traitement ASC
+      ''';
+
+      final rows = await db.query(sql, [contratId]);
+
+      final groupedMap = <String, List<Map<String, dynamic>>>{};
+
+      for (final row in rows) {
+        final typeTraitement =
+            (row['typeTraitement'] as String?) ?? 'Sans type';
+        final factureData = {
+          'factureId': row['facture_id'] as int,
+          'montant': row['montant'] as int,
+          'dateTraitement': row['date_traitement'] is String
+              ? DateTime.parse(row['date_traitement'] as String)
+              : row['date_traitement'] as DateTime,
+          'etat': row['etat'] as String,
+        };
+
+        if (!groupedMap.containsKey(typeTraitement)) {
+          groupedMap[typeTraitement] = [];
+        }
+        groupedMap[typeTraitement]!.add(factureData);
+      }
+
+      return groupedMap;
+    } catch (e) {
+      logger.e('Erreur chargement factures groupées: $e');
+      return {};
+    }
   }
 
   /// Réparer les factures d'un contrat
@@ -930,13 +1407,298 @@ class _ContratScreenState extends State<ContratScreen> {
 
   /// Voir le planning du contrat
   void _viewPlanning(Contrat contrat) {
-    // TODO: Ouvrir l'écran de planning
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Planning du contrat ${contrat.referenceContrat}'),
-        duration: const Duration(seconds: 2),
+    showDialog(
+      context: context,
+      builder: (ctx) => FutureBuilder<Client?>(
+        future: _loadClientForContrat(contrat.clientId),
+        builder: (context, clientSnapshot) {
+          final clientName = clientSnapshot.data != null
+              ? clientSnapshot.data!.fullName
+              : 'Client';
+
+          return AlertDialog(
+            title: Text('📅 Planning pour $clientName'),
+            content: SizedBox(
+              width: 550,
+              child: FutureBuilder<Map<String, List<Map<String, dynamic>>>>(
+                future: _loadContratPlanningsByType(contrat.contratId),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  if (snapshot.hasError) {
+                    return Text('Erreur: ${snapshot.error}');
+                  }
+
+                  final groupedTreatments = snapshot.data ?? {};
+
+                  if (groupedTreatments.isEmpty) {
+                    return const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.event_busy, size: 48, color: Colors.grey),
+                          SizedBox(height: 16),
+                          Text('Aucun traitement trouvé'),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: groupedTreatments.length,
+                    itemBuilder: (context, index) {
+                      final typeTraitement = groupedTreatments.keys.elementAt(
+                        index,
+                      );
+                      final traitements =
+                          groupedTreatments[typeTraitement] ?? [];
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Header du type de traitement
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[100],
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  typeTraitement,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: Colors.blue[900],
+                                  ),
+                                ),
+                                Text(
+                                  '${traitements.length} traitement(s)',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.blue[700],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          // Liste des plannings
+                          ...traitements.map((planning) {
+                            final dateStr =
+                                planning['date_planification'] != null
+                                ? DateFormat(
+                                    'EEEE dd MMMM yyyy',
+                                    'fr_FR',
+                                  ).format(
+                                    planning['date_planification'] as DateTime,
+                                  )
+                                : 'Date N/A';
+                            final parts = dateStr.split(' ');
+                            if (parts.isNotEmpty) {
+                              parts[0] =
+                                  parts[0][0].toUpperCase() +
+                                  parts[0].substring(1);
+                            }
+                            if (parts.length > 2) {
+                              parts[2] =
+                                  parts[2][0].toUpperCase() +
+                                  parts[2].substring(1);
+                            }
+                            final capitalizedDate = parts.join(' ');
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[50],
+                                border: Border.all(
+                                  color: Colors.grey[300]!,
+                                  width: 0.5,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          capitalizedDate,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        planning['etat'] ?? '-',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: _getStatusColorForPlanning(
+                                            planning['etat'] as String?,
+                                          ),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Axe: ${planning['axe'] ?? '-'}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                          const SizedBox(height: 12),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Fermer'),
+              ),
+            ],
+          );
+        },
       ),
     );
+  }
+
+  /// Charger les plannings groupés par type de traitement pour un contrat
+  Future<Map<String, List<Map<String, dynamic>>>> _loadContratPlanningsByType(
+    int contratId,
+  ) async {
+    try {
+      final database = DatabaseService();
+      const sql = '''
+        SELECT DISTINCT 
+          t.traitement_id, 
+          t.contrat_id, 
+          tt.typeTraitement,
+          tt.categorieTraitement as type,
+          pd.planning_detail_id,
+          pd.date_planification,
+          pd.statut as etat,
+          p.planning_id,
+          cl.axe
+        FROM Traitement t
+        INNER JOIN TypeTraitement tt ON t.id_type_traitement = tt.id_type_traitement
+        INNER JOIN Contrat c ON t.contrat_id = c.contrat_id
+        INNER JOIN Client cl ON c.client_id = cl.client_id
+        LEFT JOIN Planning p ON p.traitement_id = t.traitement_id
+        LEFT JOIN PlanningDetails pd ON pd.planning_id = p.planning_id
+        WHERE c.contrat_id = ?
+        ORDER BY tt.typeTraitement ASC, pd.date_planification ASC
+      ''';
+
+      final rows = await database.query(sql, [contratId]);
+
+      final groupedMap = <String, List<Map<String, dynamic>>>{};
+
+      for (final row in rows) {
+        final typeTraitement =
+            (row['typeTraitement'] as String?) ?? 'Sans type';
+
+        final planningData = {
+          'traitementId': row['traitement_id'] as int,
+          'contratId': row['contrat_id'] as int,
+          'nom': typeTraitement,
+          'type': row['type'] as String,
+          'planning_detail_id': row['planning_detail_id'],
+          'date_planification': row['date_planification'] is String
+              ? DateTime.parse(row['date_planification'] as String)
+              : row['date_planification'] as DateTime?,
+          'axe': row['axe'] as String? ?? '-',
+          'etat': row['etat'] as String? ?? '-',
+        };
+
+        if (!groupedMap.containsKey(typeTraitement)) {
+          groupedMap[typeTraitement] = [];
+        }
+        // Vérifier si cette entrée a au moins un planning detail
+        if (planningData['planning_detail_id'] != null) {
+          groupedMap[typeTraitement]!.add(planningData);
+        }
+      }
+
+      return groupedMap;
+    } catch (e) {
+      logger.e('Erreur chargement plannings: $e');
+      return {};
+    }
+  }
+
+  /// Charger le client par son ID
+  Future<Client?> _loadClientForContrat(int clientId) async {
+    try {
+      final clientRepository = context.read<ClientRepository>();
+      final db = DatabaseService();
+
+      // Essayer de récupérer du repository
+      final clients = clientRepository.clients;
+      final client = clients.firstWhereOrNull((c) => c.clientId == clientId);
+      if (client != null) {
+        return client;
+      }
+
+      // Si pas trouvé, chercher en base de données
+      const sql = '''
+        SELECT 
+          client_id, nom, prenom, email, telephone, adresse, 
+          categorie, nif, stat, axe
+        FROM Client
+        WHERE client_id = ?
+      ''';
+      final rows = await db.query(sql, [clientId]);
+      if (rows.isNotEmpty) {
+        return Client.fromMap(rows[0]);
+      }
+
+      return null;
+    } catch (e) {
+      logger.e('Erreur chargement client: $e');
+      return null;
+    }
+  }
+
+  /// Déterminer la couleur de statut pour le planning
+  Color _getStatusColorForPlanning(String? status) {
+    if (status == null) return Colors.grey[600]!;
+    final lowerStatus = status.toLowerCase();
+
+    if (lowerStatus.contains('complété') ||
+        lowerStatus.contains('done') ||
+        lowerStatus.contains('terminé')) {
+      return Colors.green[700]!;
+    } else if (lowerStatus.contains('classé sans suite') ||
+        lowerStatus.contains('cancelled') ||
+        lowerStatus.contains('annulé')) {
+      return Colors.red[700]!;
+    } else {
+      return Colors.orange[700]!;
+    }
   }
 
   /// Supprimer un contrat
@@ -1001,7 +1763,7 @@ class _ContratScreenState extends State<ContratScreen> {
         builder: (context, setState) => AlertDialog(
           title: const Text('⚠️ Abroger/Résilier le Contrat'),
           content: SizedBox(
-            width: double.maxFinite,
+            width: 550,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1518,12 +2280,17 @@ class _ContratCreationFlowScreenState
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              child: _buildMainContent(),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: _buildMainContent(),
+                ),
+              ),
             ),
           ),
           // Boutons de navigation
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: Colors.white,
               border: Border(top: BorderSide(color: Colors.grey[300]!)),
@@ -1533,6 +2300,10 @@ class _ContratCreationFlowScreenState
                 if (_mainStep > 0 || _treatmentSubStep > 0) ...[
                   Expanded(
                     child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        minimumSize: const Size(0, 40),
+                      ),
                       onPressed: () => _previousStep(),
                       child: const Text('Précédent'),
                     ),
@@ -1541,6 +2312,10 @@ class _ContratCreationFlowScreenState
                 ],
                 Expanded(
                   child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      minimumSize: const Size(0, 40),
+                    ),
                     onPressed: _canProceed() ? _nextStep : null,
                     child: Text(_getButtonLabel()),
                   ),
@@ -2162,7 +2937,9 @@ class _ContratCreationFlowScreenState
   /// Deuxième carte : Informations client (éditable selon la catégorie)
   Widget _buildClientInfoCard() {
     final isSociete = _clientCategorie.text == 'Société';
+    final isOrganisation = _clientCategorie.text == 'Organisation';
     final isParticulier = _clientCategorie.text == 'Particulier';
+    final needsNifStat = isSociete;
 
     return Card(
       elevation: 4,
@@ -2219,6 +2996,7 @@ class _ContratCreationFlowScreenState
             // Nom
             TextField(
               controller: _clientNom,
+              onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 labelText: isSociete ? 'Nom de la société' : 'Nom',
                 border: OutlineInputBorder(
@@ -2232,6 +3010,7 @@ class _ContratCreationFlowScreenState
             if (isParticulier) ...[
               TextField(
                 controller: _clientPrenom,
+                onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   labelText: 'Prénom',
                   border: OutlineInputBorder(
@@ -2243,6 +3022,7 @@ class _ContratCreationFlowScreenState
             ] else ...[
               TextField(
                 controller: _clientPrenom,
+                onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   labelText: 'Responsable',
                   border: OutlineInputBorder(
@@ -2256,6 +3036,7 @@ class _ContratCreationFlowScreenState
             // Email
             TextField(
               controller: _clientEmail,
+              onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 labelText: 'Email',
                 border: OutlineInputBorder(
@@ -2268,6 +3049,7 @@ class _ContratCreationFlowScreenState
             // Téléphone
             TextField(
               controller: _clientTelephone,
+              onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 labelText: 'Téléphone',
                 border: OutlineInputBorder(
@@ -2280,6 +3062,7 @@ class _ContratCreationFlowScreenState
             // Adresse
             TextField(
               controller: _clientAdresse,
+              onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 labelText: 'Adresse',
                 border: OutlineInputBorder(
@@ -2325,10 +3108,11 @@ class _ContratCreationFlowScreenState
             ),
             const SizedBox(height: 12),
 
-            // NIF et STAT (seulement pour Société)
-            if (isSociete) ...[
+            // NIF et STAT (pour Société uniquement)
+            if (needsNifStat) ...[
               TextField(
                 controller: _clientNif,
+                onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   labelText: 'NIF',
                   border: OutlineInputBorder(
@@ -2339,6 +3123,7 @@ class _ContratCreationFlowScreenState
               const SizedBox(height: 12),
               TextField(
                 controller: _clientStat,
+                onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   labelText: 'STAT',
                   border: OutlineInputBorder(
@@ -2406,7 +3191,9 @@ class _ContratCreationFlowScreenState
       }
 
       _treatmentPlanning[treatmentId] = {
-        'dateDebut': _dateDebut.text, // Date de début du contrat
+        'datePlanification': DateFormat('dd/MM/yyyy')
+            .parse(_dateDebut.text)
+            .toIso8601String(), // Date de planification (par défaut = date de début du contrat)
         'moisDebut': 'Janvier $anneeDebut',
         'moisFin': _isDeterminee ? 'Décembre $anneeDebut' : 'Indéterminée',
         'dureeTraitement': dureeDefaut,
@@ -2415,8 +3202,11 @@ class _ContratCreationFlowScreenState
     } else {
       // S'assurer que les clés existent (au cas où on charge depuis le cache)
       final planning = _treatmentPlanning[treatmentId]!;
-      if (!planning.containsKey('dateDebut'))
-        planning['dateDebut'] = _dateDebut.text;
+      if (!planning.containsKey('datePlanification')) {
+        planning['datePlanification'] = DateFormat(
+          'dd/MM/yyyy',
+        ).parse(_dateDebut.text).toIso8601String();
+      }
       if (!planning.containsKey('moisDebut')) {
         String anneeDebut = DateTime.now().year.toString();
         try {
@@ -2619,10 +3409,13 @@ class _ContratCreationFlowScreenState
                                   }
                                 } else {
                                   // Si indéterminé: 12 mois à partir du mois début
-                                  // Ajouter 12 mois à la date de début
-                                  moisFin =
-                                      picked.month; // Même mois, année suivante
-                                  anneeFin = picked.year + 1;
+                                  // Pour 12 mois: ajouter 11 mois (janvier + 11 = décembre)
+                                  moisFin = picked.month + 11;
+                                  anneeFin = picked.year;
+                                  if (moisFin > 12) {
+                                    moisFin -= 12;
+                                    anneeFin += 1;
+                                  }
                                 }
                                 planning['moisFin'] =
                                     '${moisNoms[moisFin - 1]} $anneeFin';
@@ -2633,7 +3426,12 @@ class _ContratCreationFlowScreenState
                                     final dateFin = DateFormat(
                                       'dd/MM/yyyy',
                                     ).parse(_dateFin.text);
-                                    int duree = dateFin.month - picked.month;
+                                    // Durée = nombre de mois complets
+                                    // Janvier à décembre = 12 mois, donc durée = 12
+                                    // dateFin.month - picked.month = 12 - 1 = 11
+                                    // Donc: ajouter 1 pour obtenir la durée totale en mois
+                                    int duree =
+                                        dateFin.month - picked.month + 1;
                                     if (duree <= 0) duree += 12;
                                     planning['dureeTraitement'] = duree
                                         .toString();
@@ -3002,18 +3800,38 @@ class _ContratCreationFlowScreenState
             const SizedBox(height: 20),
             // Infos contrat
             _buildSectionHeader('Informations du contrat'),
+            _DetailRow('Numéro contrat', _numeroContrat.text),
             _DetailRow('Date contrat', _dateContrat.text),
             _DetailRow('Date début', _dateDebut.text),
             _DetailRow('Date fin', _dateFin.text),
             _DetailRow('Catégorie', _categorie.text),
+            _DetailRow(
+              'Durée',
+              _isDeterminee
+                  ? 'Déterminée (${_duree.text} mois)'
+                  : 'Indéterminée (12 mois)',
+            ),
             const SizedBox(height: 16),
             // Infos client
             _buildSectionHeader('Informations client'),
+            _DetailRow('Catégorie', _clientCategorie.text),
             _DetailRow('Nom', _clientNom.text),
-            if (_clientPrenom.text.isNotEmpty)
-              _DetailRow('Prénom', _clientPrenom.text),
+            if (_clientPrenom.text.isNotEmpty) ...[
+              _DetailRow(
+                _clientCategorie.text == 'Société' ||
+                        _clientCategorie.text == 'Organisation'
+                    ? 'Responsable'
+                    : 'Prénom',
+                _clientPrenom.text,
+              ),
+            ],
             _DetailRow('Email', _clientEmail.text),
             _DetailRow('Téléphone', _clientTelephone.text),
+            _DetailRow('Adresse', _clientAdresse.text),
+            _DetailRow(
+              'Axe',
+              _clientAxe.text.isNotEmpty ? _clientAxe.text : 'Centre (C)',
+            ),
             if (_clientNif.text.isNotEmpty) _DetailRow('NIF', _clientNif.text),
             if (_clientStat.text.isNotEmpty)
               _DetailRow('STAT', _clientStat.text),
@@ -3023,6 +3841,10 @@ class _ContratCreationFlowScreenState
               'Traitements planifiés (${_selectedTreatments.length})',
             ),
             ..._buildTreatmentResumes(),
+            const SizedBox(height: 20),
+            // Statistiques
+            _buildSectionHeader('Statistiques par traitement'),
+            ..._buildTreatmentStatistics(),
           ],
         ),
       ),
@@ -3127,14 +3949,66 @@ class _ContratCreationFlowScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _DetailRow('Mois', planning['mois']?.toString() ?? '-'),
-                  _DetailRow(
-                    'Durée du traitement',
-                    '${planning['dureeTraitement']?.toString() ?? '-'} mois',
-                  ),
-                  _DetailRow(
-                    'Redondance',
-                    '${planning['redondance']?.toString() ?? '-'}',
+                  // Déterminer si c'est une seule fois
+                  Builder(
+                    builder: (context) {
+                      final redondance =
+                          int.tryParse(
+                            planning['redondance']?.toString() ?? '1',
+                          ) ??
+                          1;
+                      final isOnceOnly = redondance == 0;
+
+                      if (isOnceOnly) {
+                        // Une seule fois : afficher juste la date de planification
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _DetailRow(
+                              'Date de planification',
+                              _formatPlanningDate(
+                                planning['datePlanification'],
+                              ),
+                            ),
+                          ],
+                        );
+                      } else {
+                        // Récurrent : afficher première et dernière date + durée et redondance
+                        final dateDebut = planning['datePlanification'];
+                        final dureeTraitement =
+                            int.tryParse(
+                              planning['dureeTraitement']?.toString() ?? '12',
+                            ) ??
+                            12;
+                        final dateFin = _calculateLastPlanningDate(
+                          dateDebut,
+                          dureeTraitement,
+                        );
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _DetailRow(
+                              'Première date de planning',
+                              _formatPlanningDate(dateDebut),
+                            ),
+                            _DetailRow(
+                              'Dernière date de traitement',
+                              _formatPlanningDate(dateFin),
+                            ),
+                            const SizedBox(height: 8),
+                            _DetailRow(
+                              'Durée du traitement',
+                              '${planning['dureeTraitement']?.toString() ?? '-'} mois',
+                            ),
+                            _DetailRow(
+                              'Redondance',
+                              _getRedondanceLabel(redondance),
+                            ),
+                          ],
+                        );
+                      }
+                    },
                   ),
                 ],
               ),
@@ -3210,7 +4084,7 @@ class _ContratCreationFlowScreenState
 
     return GridView.count(
       crossAxisCount: 2,
-      childAspectRatio: 9.5,
+      childAspectRatio: 4.5,
       mainAxisSpacing: 3,
       crossAxisSpacing: 3,
       shrinkWrap: true,
@@ -3324,7 +4198,6 @@ class _ContratCreationFlowScreenState
     );
   }
 
-  /// Sélectionner une date (wrapper simple)
   /// Sélectionner une date
   Future<void> _selectDate(
     BuildContext ctx,
@@ -3338,7 +4211,30 @@ class _ContratCreationFlowScreenState
     );
     if (date != null) {
       controller.text = DateFormat('dd/MM/yyyy').format(date);
+
+      // Si c'est la date de début et que c'est "Déterminée", calculer automatiquement la date fin
+      if (controller == _dateDebut && _isDeterminee) {
+        // Ajouter le nombre de mois (12 par défaut, ou selon _duree si modifiable)
+        final dureeEnMois = int.tryParse(_duree.text) ?? 12;
+        // Ajouter (dureeEnMois - 1) mois à la date de début
+        // Car le mois 1 = date de début, donc pour 12 mois, on ajoute 11 mois
+        final dateFin = _addMonthsToDate(date, dureeEnMois - 1);
+        _dateFin.text = DateFormat('dd/MM/yyyy').format(dateFin);
+      }
     }
+  }
+
+  /// Ajouter des mois à une date
+  DateTime _addMonthsToDate(DateTime date, int months) {
+    final month = date.month - 1 + months;
+    final year = date.year + (month ~/ 12);
+    final newMonth = (month % 12) + 1;
+
+    // Gérer le dernier jour du mois
+    final daysInMonth = DateTime(year, newMonth + 1, 0).day;
+    final day = date.day > daysInMonth ? daysInMonth : date.day;
+
+    return DateTime(year, newMonth, day);
   }
 
   /// Vérifier si on peut procéder
@@ -3369,7 +4265,8 @@ class _ContratCreationFlowScreenState
       if (_clientNom.text.isEmpty ||
           _clientEmail.text.isEmpty ||
           _clientTelephone.text.isEmpty ||
-          _clientAdresse.text.isEmpty) {
+          _clientAdresse.text.isEmpty ||
+          _clientAxe.text.isEmpty) {
         return false;
       }
       // Vérifier prénom pour particulier
@@ -3377,7 +4274,7 @@ class _ContratCreationFlowScreenState
           _clientPrenom.text.isEmpty) {
         return false;
       }
-      // Vérifier NIF et STAT pour Société seulement
+      // Vérifier NIF et STAT pour Société uniquement
       if (_clientCategorie.text == 'Société' &&
           (_clientNif.text.isEmpty || _clientStat.text.isEmpty)) {
         return false;
@@ -3610,6 +4507,9 @@ class _ContratCreationFlowScreenState
           final datePlanificationSelected =
               planningData['datePlanification'] is DateTime
               ? planningData['datePlanification'] as DateTime
+              : planningData['datePlanification'] is String &&
+                    (planningData['datePlanification'] as String).isNotEmpty
+              ? DateTime.parse(planningData['datePlanification'] as String)
               : DateTime.now();
 
           logger.i(
@@ -3796,6 +4696,152 @@ class _ContratCreationFlowScreenState
       'Décembre': 12,
     };
     return moisMap[mois] ?? 1;
+  }
+
+  /// Convertir la valeur de redondance en label lisible
+  String _getRedondanceLabel(int redondance) {
+    switch (redondance) {
+      case 0:
+        return 'Une seule fois';
+      case 1:
+        return 'Mensuel (1 mois)';
+      case 2:
+        return 'Bimestriel (2 mois)';
+      case 3:
+        return 'Trimestriel (3 mois)';
+      case 4:
+        return 'Quadrimestriel (4 mois)';
+      case 6:
+        return 'Semestriel (6 mois)';
+      case 12:
+        return 'Annuel (12 mois)';
+      default:
+        return 'Tous les $redondance mois';
+    }
+  }
+
+  /// Formater la date de planning pour l'affichage
+  String _formatPlanningDate(dynamic dateValue) {
+    try {
+      DateTime date;
+      if (dateValue is DateTime) {
+        date = dateValue;
+      } else if (dateValue is String) {
+        date = dateValue.contains('T')
+            ? DateTime.parse(dateValue)
+            : DateTime.parse('${dateValue}T00:00:00');
+      } else {
+        return '-';
+      }
+      return DateFormat('dd/MM/yyyy').format(date);
+    } catch (e) {
+      return '-';
+    }
+  }
+
+  /// Calculer la dernière date de planning en fonction de la durée
+  DateTime _calculateLastPlanningDate(dynamic dateValue, int dureeTraitement) {
+    try {
+      DateTime startDate;
+      if (dateValue is DateTime) {
+        startDate = dateValue;
+      } else if (dateValue is String) {
+        startDate = dateValue.contains('T')
+            ? DateTime.parse(dateValue)
+            : DateTime.parse('${dateValue}T00:00:00');
+      } else {
+        return DateTime.now();
+      }
+
+      // Ajouter (dureeTraitement - 1) mois pour obtenir la dernière date
+      // Car janvier + 12 mois = décembre (pas janvier 2027)
+      final month = startDate.month - 1 + (dureeTraitement - 1);
+      final year = startDate.year + (month ~/ 12);
+      final newMonth = (month % 12) + 1;
+      final daysInMonth = DateTime(year, newMonth + 1, 0).day;
+      final day = startDate.day > daysInMonth ? daysInMonth : startDate.day;
+
+      return DateTime(year, newMonth, day);
+    } catch (e) {
+      return DateTime.now();
+    }
+  }
+
+  /// Construire les statistiques pour chaque traitement
+  List<Widget> _buildTreatmentStatistics() {
+    return _selectedTreatments.asMap().entries.map((entry) {
+      final idx = entry.key;
+      final treatmentId = entry.value;
+
+      // Chercher le traitement réel dans la liste
+      final treatmentFound = _allTreatments.firstWhereOrNull(
+        (t) => t.id == treatmentId,
+      );
+      if (treatmentFound == null) {
+        return const SizedBox.shrink();
+      }
+
+      final treatmentName = treatmentFound.displayName;
+      final planning = _treatmentPlanning[treatmentId] ?? {};
+      final facture = _treatmentFactures[treatmentId] ?? {};
+      final nombrePlanifications = _calculateNumberOfPlannings(treatmentId);
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.blue[50],
+          border: Border.all(color: Colors.blue[200]!),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${idx + 1}. $treatmentName',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            _DetailRow('Planifications', '$nombrePlanifications prévues'),
+            _DetailRow(
+              'Factures',
+              '${facture['reference']?.toString() != null ? 'Oui' : 'À créer'}',
+            ),
+            _DetailRow('Remarques', 'À vérifier'),
+            _DetailRow('Historiques', 'À charger'),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: Colors.grey[300]!),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Détails:',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  _DetailRow('Type traitement', treatmentFound.type),
+                  _DetailRow('Catégorie', treatmentFound.categorie),
+                  _DetailRow(
+                    'Coût total',
+                    '${_calculateTotalCost(treatmentId)} MGA',
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }).toList();
   }
 }
 
