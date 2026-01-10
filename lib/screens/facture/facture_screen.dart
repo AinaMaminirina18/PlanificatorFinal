@@ -242,7 +242,7 @@ class _FactureScreenState extends State<FactureScreen> {
     final Map<String, List<Facture>> grouped = {};
     for (final facture in filteredFactures) {
       final key =
-          '${facture.clientNom} ${facture.clientPrenom} - ${facture.typeTreatment ?? 'N/A'}';
+          '${facture.clientFullName} - ${facture.typeTreatment ?? 'N/A'}';
       if (!grouped.containsKey(key)) {
         grouped[key] = [];
       }

@@ -4,6 +4,7 @@ import 'package:logger/logger.dart';
 import '../../repositories/index.dart';
 import '../../models/index.dart';
 import '../../utils/excel_utils.dart';
+import '../../services/database_service.dart';
 
 final logger = Logger();
 
@@ -16,13 +17,14 @@ class ExportScreen extends StatefulWidget {
 
 class _ExportScreenState extends State<ExportScreen> {
   bool _isExporting = false;
+  bool _isLoadingClients = true;
   String? _lastExportPath;
   final ExcelService _excelService = ExcelService();
 
   // Dropdowns
   String _selectedCategory = 'Facture';
   String _selectedTraitement = 'Tous';
-  String _selectedMois = 'Janvier';
+  String _selectedMois = 'Tous';
   String _selectedClient = 'Tous';
 
   // Options pour les dropdowns
@@ -32,6 +34,7 @@ class _ExportScreenState extends State<ExportScreen> {
     'Tous': 'Tous',
   }; // Map affichage -> valeur DB
   final List<String> _mois = [
+    'Tous',
     'Janvier',
     'Février',
     'Mars',
@@ -53,36 +56,60 @@ class _ExportScreenState extends State<ExportScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadClients();
-      // Charger les traitements pour 'Tous' au démarrage
-      _loadTreatmentsForClient(-1);
+      // Charger les traitements au démarrage (pour "Tous" = tous les clients)
+      _loadTreatmentsForClient(-1); // -1 = Tous
     });
   }
 
   Future<void> _loadClients() async {
     try {
-      final clientRepo = context.read<ClientRepository>();
+      final db = DatabaseService();
 
-      // Charger tous les clients d'abord
-      await clientRepo.loadClients();
+      // Charger DIRECTEMENT tous les clients depuis la base de données
+      const sql = '''
+        SELECT client_id, nom, prenom, categorie
+        FROM Client
+        ORDER BY nom ASC
+      ''';
+
+      logger.i('📥 Chargement des clients depuis la DB...');
+      final rows = await db.query(sql);
+      logger.i('📦 ${rows.length} clients trouvés en DB');
 
       final clientMap = <String, int>{'Tous': -1};
       final clientList = ['Tous'];
 
-      for (final client in clientRepo.clients) {
-        final fullName = '${client.prenom} ${client.nom}';
-        clientMap[fullName] = client.clientId;
+      for (final row in rows) {
+        final clientId = row['client_id'] as int;
+        final nom = row['nom'] as String;
+        final prenom = row['prenom'] as String;
+        final categorie = row['categorie'] as String;
+
+        // Construire le fullName selon la catégorie
+        final fullName = (categorie == 'Société' || categorie == 'Organisation')
+            ? nom
+            : '$prenom $nom'.trim();
+
+        clientMap[fullName] = clientId;
         clientList.add(fullName);
+        logger.i('✅ Client ajouté: $fullName (ID: $clientId, Cat: $categorie)');
       }
 
       if (mounted) {
         setState(() {
           _clients = clientList;
           _clientMap = clientMap;
-          logger.i('✅ ${clientList.length - 1} clients chargés pour l\'export');
+          _isLoadingClients = false;
+          logger.i(
+            '✅ ${clientList.length - 1} clients affichables (total: ${clientList.length} avec Tous)',
+          );
         });
       }
     } catch (e) {
-      logger.e('Erreur lors du chargement des clients: $e');
+      logger.e('❌ Erreur lors du chargement des clients: $e');
+      if (mounted) {
+        setState(() => _isLoadingClients = false);
+      }
     }
   }
 
@@ -90,7 +117,7 @@ class _ExportScreenState extends State<ExportScreen> {
     try {
       final planningRepo = context.read<PlanningDetailsRepository>();
 
-      // Charger les traitements uniques pour ce client
+      // Charger les traitements pour le client sélectionné
       final treatmentList = await planningRepo.getTreatmentTypesForClient(
         clientId,
       );
@@ -99,32 +126,32 @@ class _ExportScreenState extends State<ExportScreen> {
       final treatments = ['Tous'];
 
       for (final treatment in treatmentList) {
-        traitementMap[treatment] = treatment;
-        treatments.add(treatment);
+        // Éviter les doublons (ne pas ajouter "Tous" si déjà présent)
+        if (treatment != 'Tous' && !treatments.contains(treatment)) {
+          traitementMap[treatment] = treatment;
+          treatments.add(treatment);
+        }
       }
 
       if (mounted) {
         setState(() {
           _traitements = treatments;
           _traitementMap = traitementMap;
-          _selectedTraitement = 'Tous'; // Réinitialiser la sélection
-          logger.i(
-            '✅ ${treatments.length - 1} traitements chargés pour le client $clientId',
-          );
+          _selectedTraitement = 'Tous';
+          final clientName = clientId == -1
+              ? 'tous les clients'
+              : _selectedClient;
+          logger.i('✅ ${treatments.length - 1} traitements pour $clientName');
         });
       }
     } catch (e) {
-      logger.e('Erreur lors du chargement des traitements: $e');
+      logger.e('❌ Erreur lors du chargement des traitements: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Export en format Excel'),
-        centerTitle: true,
-      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -185,19 +212,52 @@ class _ExportScreenState extends State<ExportScreen> {
                 const SizedBox(height: 24),
 
                 // Client
-                _buildDropdownRow(
-                  label: 'Client',
-                  value: _selectedClient,
-                  items: _clients,
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedClient = value;
-                      // Charger les traitements pour ce client
-                      final clientId = _clientMap[value] ?? -1;
-                      _loadTreatmentsForClient(clientId);
-                    });
-                  },
-                ),
+                _isLoadingClients
+                    ? Row(
+                        children: [
+                          Text(
+                            'Client',
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(fontWeight: FontWeight.w500),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              height: 56,
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey[400]!),
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.grey[100],
+                              ),
+                              child: const Align(
+                                alignment: Alignment.centerLeft,
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : _buildDropdownRow(
+                        label: 'Client',
+                        value: _selectedClient,
+                        items: _clients,
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedClient = value;
+                            // Les traitements sont chargés une fois au démarrage
+                            // Pas besoin de les recharger quand on change de client
+                          });
+                        },
+                      ),
                 const SizedBox(height: 40),
 
                 // Question et boutons
@@ -209,7 +269,7 @@ class _ExportScreenState extends State<ExportScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // Boutons Générer et Annuler
+                // Boutons Générer, Actualiser et Annuler
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -244,7 +304,28 @@ class _ExportScreenState extends State<ExportScreen> {
                               ),
                             ),
                     ),
-                    const SizedBox(width: 24),
+                    const SizedBox(width: 16),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue[400],
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 40,
+                          vertical: 16,
+                        ),
+                      ),
+                      onPressed: _isExporting
+                          ? null
+                          : () => _actualiserDonnees(),
+                      child: const Text(
+                        'Actualiser',
+                        style: TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red[400],
@@ -349,28 +430,72 @@ class _ExportScreenState extends State<ExportScreen> {
           ),
         ),
         const SizedBox(width: 16),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey[400]!),
-            borderRadius: BorderRadius.circular(8),
-            color: Colors.white,
-          ),
-          child: DropdownButton<String>(
-            value: value,
-            underline: const SizedBox(),
-            items: items.map((String item) {
-              return DropdownMenuItem<String>(value: item, child: Text(item));
-            }).toList(),
-            onChanged: (String? newValue) {
-              if (newValue != null) {
-                onChanged(newValue);
-              }
-            },
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey[400]!),
+              borderRadius: BorderRadius.circular(8),
+              color: Colors.white,
+            ),
+            child: DropdownButton<String>(
+              value: value,
+              underline: const SizedBox(),
+              isExpanded: true,
+              isDense: false,
+              itemHeight: 56,
+              menuMaxHeight: 400,
+              items: items.map((String item) {
+                return DropdownMenuItem<String>(
+                  value: item,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4.0),
+                    child: Text(
+                      item,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                  ),
+                );
+              }).toList(),
+              onChanged: (String? newValue) {
+                if (newValue != null) {
+                  onChanged(newValue);
+                }
+              },
+            ),
           ),
         ),
       ],
     );
+  }
+
+  Future<void> _actualiserDonnees() async {
+    setState(() {
+      _isLoadingClients = true;
+      _selectedClient = 'Tous';
+      _selectedTraitement = 'Tous';
+      _selectedMois = 'Tous';
+      _selectedCategory = 'Facture';
+    });
+
+    // Recharger les clients
+    await _loadClients();
+
+    // Recharger les traitements (pour "Tous")
+    await _loadTreatmentsForClient(-1);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Données actualisées'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+
+    logger.i('🔄 Actualisation complète des données');
   }
 
   Future<void> _generererExcel(BuildContext context) async {
@@ -417,6 +542,15 @@ class _ExportScreenState extends State<ExportScreen> {
         factures = factureRepo.factures;
       }
 
+      // Filtrer par mois si ce n'est pas "Tous"
+      if (_selectedMois != 'Tous') {
+        final monthIndex = _mois.indexOf(_selectedMois);
+        factures = factures.where((f) {
+          final dateTraitement = f.dateTraitement;
+          return dateTraitement != null && dateTraitement.month == monthIndex;
+        }).toList();
+      }
+
       if (factures.isEmpty) {
         _showErrorDialog(
           context,
@@ -450,7 +584,7 @@ class _ExportScreenState extends State<ExportScreen> {
         data,
         '${_selectedClient}_${_selectedMois}',
         DateTime.now().year,
-        _mois.indexOf(_selectedMois) + 1,
+        _selectedMois == 'Tous' ? 0 : _mois.indexOf(_selectedMois),
       );
 
       if (mounted) {

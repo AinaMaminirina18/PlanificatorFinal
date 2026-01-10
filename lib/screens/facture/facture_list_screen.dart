@@ -92,7 +92,7 @@ class _FactureListScreenState extends State<FactureListScreen> {
           // Grouper les factures par client et traitement
           final Map<String, List<Facture>> groupedByClient = {};
           for (final facture in filteredFactures) {
-            final clientName = facture.clientNom ?? 'Inconnu';
+            final clientName = facture.clientFullName;
             if (!groupedByClient.containsKey(clientName)) {
               groupedByClient[clientName] = [];
             }
