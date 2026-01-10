@@ -89,16 +89,13 @@ class ExcelService {
     );
   }
 
-  // --- 2. FONCTION : generer_facture_excel (Mensuel) ---
+  // --- 2. FONCTION : generer_facture_excel (Mensuel ou Annuel) ---
   Future<void> genererFactureExcel(
     List<Map<String, dynamic>> data,
     String clientFullName,
     int year,
     int month,
   ) async {
-    final String monthNameFr = DateFormat.MMMM(
-      'fr_FR',
-    ).format(DateTime(year, month)).toUpperCase();
     final String safeName = _getSafeName(clientFullName);
 
     final Workbook workbook = Workbook();
@@ -107,11 +104,25 @@ class ExcelService {
     int currentRow = 1;
     currentRow = _insertClientHeader(sheet, data, clientFullName, currentRow);
 
-    // Titre mensuel
+    // Titre - varie selon que c'est un mois spécifique ou tous les mois
+    String titleText;
+    String filename;
+
+    if (month == 0) {
+      // Tous les mois (annuel)
+      titleText = "Rapport de Facturation pour l'année : $year";
+      filename = "$safeName-Annuel-$year.xlsx";
+    } else {
+      // Mois spécifique
+      final String monthNameFr = DateFormat.MMMM(
+        'fr_FR',
+      ).format(DateTime(year, month)).toUpperCase();
+      titleText = "Facture du mois de : $monthNameFr $year";
+      filename = "$safeName-$monthNameFr-$year.xlsx";
+    }
+
     sheet.getRangeByIndex(currentRow, 1, currentRow, 9).merge();
-    sheet
-        .getRangeByIndex(currentRow, 1)
-        .setText("Facture du mois de : $monthNameFr $year");
+    sheet.getRangeByIndex(currentRow, 1).setText(titleText);
     sheet.getRangeByIndex(currentRow, 1).cellStyle = _getHeaderStyle(workbook);
     currentRow += 2;
 
@@ -120,11 +131,11 @@ class ExcelService {
       workbook,
       data,
       currentRow,
-      isMonthly: true,
+      isMonthly: month != 0,
     );
-    _insertTotals(sheet, workbook, data, currentRow, isMonthly: true);
+    _insertTotals(sheet, workbook, data, currentRow, isMonthly: month != 0);
 
-    _saveFile(workbook, paths[0], "$safeName-$monthNameFr-$year.xlsx");
+    _saveFile(workbook, paths[0], filename);
   }
 
   // --- 3. FONCTION : generate_traitements_excel ---
@@ -170,10 +181,11 @@ class ExcelService {
           cell.cellStyle.borders.all.lineStyle = LineStyle.thin;
 
           if (headers[j] == 'Etat traitement') {
-            if (value == 'Effectué')
+            if (value == 'Effectué') {
               cell.cellStyle.backColor = '#FFC7CE';
-            else if (value == 'À venir')
+            } else if (value == 'À venir') {
               cell.cellStyle.backColor = '#C6EFCE';
+            }
           }
         }
       }
@@ -272,10 +284,11 @@ class ExcelService {
                     ? item['Etat paiement (Payée ou non)']
                     : item['Etat de Paiement'])
                 .toString();
-        if (status == 'Payé')
+        if (status == 'Payé') {
           cell.cellStyle.backColor = '#C6EFCE';
-        else if (status == 'Non payé')
+        } else if (status == 'Non payé') {
           cell.cellStyle.backColor = '#FFC7CE';
+        }
       }
       rIdx++;
     }
