@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:logger/logger.dart';
 import '../models/index.dart';
 import '../services/index.dart';
 import '../services/logging_service.dart';
