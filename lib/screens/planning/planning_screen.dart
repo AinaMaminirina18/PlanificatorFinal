@@ -719,45 +719,60 @@ class _PlanningDetailScreenState extends State<_PlanningDetailScreen> {
             // Boutons centré et petit
             Center(
               child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 12,
+                runSpacing: 12,
+                alignment: WrapAlignment.center,
                 children: [
                   // Bouton 1: Ajouter une Remarque
                   SizedBox(
-                    width: 150,
+                    width: 220,
+                    height: 56,
                     child: ElevatedButton(
                       onPressed: _showRemarqueDialog,
                       style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: EdgeInsets.zero,
                         backgroundColor: Colors.blue,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                       child: const Text(
                         'Ajouter une remarque',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 12,
+                          fontSize: 13,
                           fontWeight: FontWeight.bold,
                         ),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ),
 
                   // Bouton 2: Signaler un Problème
                   SizedBox(
-                    width: 150,
+                    width: 220,
+                    height: 56,
                     child: ElevatedButton(
                       onPressed: _showSignalementDialog,
                       style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: EdgeInsets.zero,
                         backgroundColor: Colors.redAccent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                       child: const Text(
                         'Signaler un problème',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 12,
+                          fontSize: 13,
                           fontWeight: FontWeight.bold,
                         ),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ),
