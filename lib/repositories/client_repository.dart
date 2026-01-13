@@ -26,14 +26,23 @@ class ClientRepository extends ChangeNotifier {
     try {
       const sql = '''
         SELECT 
-          c.client_id, c.nom, c.prenom, c.email, c.telephone, c.adresse, 
-          c.categorie, c.nif, c.stat, c.axe,
+          c.client_id, 
+          COALESCE(c.nom, 'Sans nom') as nom, 
+          COALESCE(c.prenom, '') as prenom, 
+          COALESCE(c.email, '') as email, 
+          COALESCE(c.telephone, '') as telephone, 
+          COALESCE(c.adresse, '') as adresse, 
+          COALESCE(c.categorie, '') as categorie, 
+          COALESCE(c.nif, '') as nif, 
+          COALESCE(c.stat, '') as stat, 
+          COALESCE(c.axe, '') as axe,
           COALESCE(COUNT(DISTINCT t.traitement_id), 0) as treatment_count
         FROM Client c
         LEFT JOIN Contrat co ON c.client_id = co.client_id
         LEFT JOIN Traitement t ON co.contrat_id = t.contrat_id
         GROUP BY c.client_id
-        ORDER BY c.nom ASC
+        ORDER BY COALESCE(c.nom, 'Z') ASC
+        LIMIT 10000
       ''';
 
       final rows = await _db.query(sql);
