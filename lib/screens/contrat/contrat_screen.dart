@@ -662,11 +662,11 @@ class _ContratScreenState extends State<ContratScreen> {
                                     ),
                                   ),
                                   Text(
-                                    '💰 ${stat['montantTotal'] ?? 0} MGA',
+                                    '� Redondance: ${_getRedondanceLabel(stat['redondance'] as int? ?? 1)}', // ✅ Ajouter redondance
                                     style: TextStyle(
                                       fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.green[700],
+                                      color: Colors.orange[700],
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ],
@@ -677,14 +677,15 @@ class _ContratScreenState extends State<ContratScreen> {
                                     MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
-                                    '📄 Factures: ${stat['factures'] ?? 0}',
+                                    '💰 ${stat['montantTotal'] ?? 0} MGA',
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: Colors.grey[700],
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green[700],
                                     ),
                                   ),
                                   Text(
-                                    '💬 Remarques: ${stat['remarques'] ?? 0}',
+                                    '📄 Factures: ${stat['factures'] ?? 0}',
                                     style: TextStyle(
                                       fontSize: 11,
                                       color: Colors.grey[700],
@@ -693,12 +694,25 @@ class _ContratScreenState extends State<ContratScreen> {
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              Text(
-                                '📋 Historiques: ${stat['historiques'] ?? 0}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey[700],
-                                ),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    '💬 Remarques: ${stat['remarques'] ?? 0}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                  Text(
+                                    '📋 Historiques: ${stat['historiques'] ?? 0}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -913,6 +927,26 @@ class _ContratScreenState extends State<ContratScreen> {
           montantTotal = 0;
         }
 
+        // Récupérer la redondance du planning pour ce traitement
+        int redondance = 1; // Défaut: mensuel
+        try {
+          const sqlRedondance = '''
+            SELECT redondance FROM Planning WHERE traitement_id = ? LIMIT 1
+          ''';
+          final redondanceResult = await db.query(sqlRedondance, [
+            traitementId,
+          ]);
+          if (redondanceResult.isNotEmpty) {
+            final redondanceValue = redondanceResult[0]['redondance'];
+            if (redondanceValue != null) {
+              redondance = int.tryParse(redondanceValue.toString()) ?? 1;
+            }
+          }
+        } catch (e) {
+          logger.w('Erreur récupération redondance: $e');
+          redondance = 1;
+        }
+
         stats.add({
           'nom': t['nom'] ?? 'Traitement',
           'planifications': plannings,
@@ -920,6 +954,7 @@ class _ContratScreenState extends State<ContratScreen> {
           'remarques': remarques,
           'historiques': historiques,
           'montantTotal': montantTotal,
+          'redondance': redondance,
         });
       }
 
@@ -927,6 +962,26 @@ class _ContratScreenState extends State<ContratScreen> {
     } catch (e) {
       logger.e('Erreur chargement statistiques: $e');
       return [];
+    }
+  }
+
+  /// Convertir la redondance numérique en libellé lisible
+  String _getRedondanceLabel(int redondance) {
+    switch (redondance) {
+      case 0:
+        return 'Une seule fois';
+      case 1:
+        return 'Mensuel';
+      case 2:
+        return 'Bi-mensuel';
+      case 3:
+        return 'Trimestriel';
+      case 6:
+        return 'Semestriel (6 mois)';
+      case 12:
+        return 'Annuel (12 mois)';
+      default:
+        return 'Tous les $redondance mois';
     }
   }
 
@@ -4669,16 +4724,30 @@ class _ContratCreationFlowScreenState
   /// Formater la date de planning pour l'affichage
   String _formatPlanningDate(dynamic dateValue) {
     try {
-      DateTime date;
-      if (dateValue is DateTime) {
-        date = dateValue;
-      } else if (dateValue is String) {
-        date = dateValue.contains('T')
-            ? DateTime.parse(dateValue)
-            : DateTime.parse('${dateValue}T00:00:00');
-      } else {
+      // Validation et conversion de type sécurisée
+      if (dateValue == null) {
         return '-';
       }
+
+      DateTime? date;
+      if (dateValue is DateTime) {
+        date = dateValue;
+      } else if (dateValue is String && dateValue.isNotEmpty) {
+        // Gérer les formats MySQL (DATE et DATETIME)
+        try {
+          date = dateValue.contains('T')
+              ? DateTime.parse(dateValue)
+              : DateTime.parse('${dateValue}T00:00:00');
+        } catch (parseError) {
+          return '-';
+        }
+      }
+
+      // Validation de la date parsée
+      if (date == null || date.year < 1900 || date.year > 2100) {
+        return '-';
+      }
+
       return DateFormat('dd/MM/yyyy').format(date);
     } catch (e) {
       return '-';
@@ -4688,14 +4757,26 @@ class _ContratCreationFlowScreenState
   /// Calculer la dernière date de planning en fonction de la durée
   DateTime _calculateLastPlanningDate(dynamic dateValue, int dureeTraitement) {
     try {
-      DateTime startDate;
+      // Validation et conversion de type sécurisée
+      if (dateValue == null || dureeTraitement <= 0) {
+        return DateTime.now();
+      }
+
+      DateTime? startDate;
       if (dateValue is DateTime) {
         startDate = dateValue;
-      } else if (dateValue is String) {
-        startDate = dateValue.contains('T')
-            ? DateTime.parse(dateValue)
-            : DateTime.parse('${dateValue}T00:00:00');
-      } else {
+      } else if (dateValue is String && dateValue.isNotEmpty) {
+        try {
+          startDate = dateValue.contains('T')
+              ? DateTime.parse(dateValue)
+              : DateTime.parse('${dateValue}T00:00:00');
+        } catch (parseError) {
+          return DateTime.now();
+        }
+      }
+
+      // Vérifier la validité de startDate
+      if (startDate == null || startDate.year < 1900 || startDate.year > 2100) {
         return DateTime.now();
       }
 
@@ -4704,10 +4785,18 @@ class _ContratCreationFlowScreenState
       final month = startDate.month - 1 + (dureeTraitement - 1);
       final year = startDate.year + (month ~/ 12);
       final newMonth = (month % 12) + 1;
+
+      // Gestion sécurisée du dernier jour du mois
       final daysInMonth = DateTime(year, newMonth + 1, 0).day;
       final day = startDate.day > daysInMonth ? daysInMonth : startDate.day;
 
-      return DateTime(year, newMonth, day);
+      // Validation finale
+      final result = DateTime(year, newMonth, day);
+      if (result.year < 1900 || result.year > 2100) {
+        return DateTime.now();
+      }
+
+      return result;
     } catch (e) {
       return DateTime.now();
     }
@@ -4731,6 +4820,14 @@ class _ContratCreationFlowScreenState
       final facture = _treatmentFactures[treatmentId] ?? {};
       final nombrePlanifications = _calculateNumberOfPlannings(treatmentId);
 
+      // Obtenir la redondance pour ce traitement
+      final planning = _treatmentPlanning[treatmentId];
+      final redondanceValue =
+          (planning?['redondance'] as String?)?.split(' ')[0] ?? '1';
+      final redondanceLabel = _getRedondanceLabel(
+        int.tryParse(redondanceValue) ?? 1,
+      );
+
       return Container(
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(12),
@@ -4748,6 +4845,7 @@ class _ContratCreationFlowScreenState
             ),
             const SizedBox(height: 8),
             _DetailRow('Planifications', '$nombrePlanifications prévues'),
+            _DetailRow('Redondance', redondanceLabel), //  Ajouter la redondance
             _DetailRow(
               'Factures',
               '${facture['reference']?.toString() != null ? 'Oui' : 'À créer'}',
