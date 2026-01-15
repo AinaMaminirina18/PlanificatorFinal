@@ -6,6 +6,7 @@ import '../../services/index.dart';
 import '../../config/database_config.dart';
 import '../../core/theme.dart';
 import '../../widgets/index.dart';
+import '../legal/legal_documents_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -119,13 +120,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: () => _showAboutDialog(context),
                     ),
                     _buildModernCard(
-                      icon: Icons.description_outlined,
-                      title: 'Politique de confidentialité',
-                      subtitle: 'Consultez nos conditions',
-                      onTap: () => AppDialogs.info(
+                      icon: Icons.gavel_outlined,
+                      title: 'Documents Légaux',
+                      subtitle: 'Politique, conditions et conformité',
+                      onTap: () => Navigator.push(
                         context,
-                        title: 'Politique de confidentialité',
-                        message: 'Votre politique de confidentialité ici.',
+                        MaterialPageRoute(
+                          builder: (context) => const LegalDocumentsScreen(),
+                        ),
                       ),
                     ),
                     _buildModernCard(
@@ -247,7 +249,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Column(
                     children: const [
                       Text(
-                        'Planificator 2.0.0',
+                        'Planificator 2.1.1',
                         style: TextStyle(color: Colors.grey),
                       ),
                     ],
