@@ -234,15 +234,23 @@ class DateUtils {
 
     // Générer les dates de planification selon la redondance
     DateTime currentDate = dateDebut;
+    final maxDates = 1000;
 
-    while (currentDate.isBefore(dateFin)) {
+    while (!currentDate.isAfter(dateFin) && dates.length < maxDates) {
       // Ajuster si weekend (dimanche) ET/OU jour férié
       var plannedDate = adjustIfWeekendAndHoliday(currentDate);
 
       dates.add(plannedDate);
 
       // Passer à la prochaine date en fonction de la redondance
-      currentDate = _addMonths(currentDate, redondance);
+      final nextDate = _addMonths(currentDate, redondance);
+
+      // Break si pas de changement (éviter boucle infinie)
+      if (nextDate == currentDate) {
+        break;
+      }
+
+      currentDate = nextDate;
     }
 
     return dates;
